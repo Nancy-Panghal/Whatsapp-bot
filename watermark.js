@@ -143,6 +143,9 @@ async function logLessonAccess(phone, lessonId, courseId) {
         )
         // In production: alert creator via email/notification
       }
+    }
+  
+  
   } catch (err) {
     // Non-critical — don't let logging failure break lesson delivery
     console.error('[watermark] Log error:', err.message)
