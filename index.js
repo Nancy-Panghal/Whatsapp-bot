@@ -185,7 +185,7 @@ async function handleStart(phone, token) {
   if (!token) {
     await sendWhatsAppMessage(
       phone,
-      "Welcome to AcademyKit.\n\nOpen a course page and tap *Start on WhatsApp* to connect your course.",
+      "Welcome to Kurso! 👋\n\nOpen a course page and tap *Start on WhatsApp* to connect your course.",
     );
     return;
   }
@@ -265,8 +265,12 @@ async function handleStart(phone, token) {
     student = inserted;
   }
 
-  const phoneOrEmail = tokenRow.student_phone || tokenRow.student_email || String(phone);
+  // IMPORTANT: Always use the actual WhatsApp sender phone for the enrollment.
+  // This ensures getEnrollment(phone) works correctly in all subsequent commands.
+  // tokenRow.student_phone is only used to look up an existing student record.
   const isPaid = Boolean(tokenRow.payment_id);
+  // Use actual WhatsApp phone as the enrollment identifier, fall back to email for free-only courses
+  const phoneOrEmail = String(phone);
 
   // 4. Find existing enrollment by every identifier before inserting
   let existingEnrollment = null;
@@ -605,8 +609,8 @@ async function handleIncomingMessage(req) {
   }
 }
 
-// Webhook endpoint for Twilio
-app.post("/webhook", async (req, res) => {
+// Webhook endpoint for Twilio — must match what you set in Twilio Console Sandbox Settings
+app.post("/webhook/whatsapp", async (req, res) => {
   // Respond to Twilio immediately with 200 OK
   res.status(200).send('<Response></Response>');
   try {
