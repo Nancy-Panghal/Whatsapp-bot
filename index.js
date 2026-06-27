@@ -103,16 +103,21 @@ async function sendWhatsAppMessage(toPhone, text, keyboard) {
   }
 
   try {
-    await axios.post(twilioUrl, new URLSearchParams(body), {
+    const resp = await axios.post(twilioUrl, new URLSearchParams(body), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': `Basic ${auth}`,
       },
       timeout: 10000,
     });
+    console.log('[sendWhatsAppMessage] ✅ sent to', toPhone, '| status:', resp.status, '| sid:', resp.data?.sid);
   } catch (err) {
-    console.error('[sendWhatsAppMessage] error:', err.response?.data || err.message);
-    throw err;
+    // Log full Twilio error but NEVER rethrow — a failed reply must not crash
+    // the handler or roll back enrollment operations
+    const errData = err.response?.data;
+    console.error('[sendWhatsAppMessage] ❌ FAILED to', toPhone);
+    console.error('[sendWhatsAppMessage] Twilio error code:', errData?.code, '| message:', errData?.message || err.message);
+    console.error('[sendWhatsAppMessage] Twilio more info:', errData?.more_info || '(none)');
   }
 }
 
@@ -182,6 +187,8 @@ async function getEnrollment(phone) {
 }
 
 async function handleStart(phone, token) {
+  console.log('[handleStart] called | phone:', phone, '| token:', token ? token.slice(0, 16) + '...' : '(none)');
+
   if (!token) {
     await sendWhatsAppMessage(
       phone,
@@ -191,6 +198,7 @@ async function handleStart(phone, token) {
   }
 
   // 1. Find valid unused token
+  console.log('[handleStart] step 1 — looking up token in whatsapp_tokens');
   const tokenRow = await firstRow(
     supabase
       .from("whatsapp_tokens")
@@ -201,12 +209,14 @@ async function handleStart(phone, token) {
   );
 
   if (!tokenRow) {
+    console.warn('[handleStart] ❌ token not found or already used or expired:', token.slice(0, 16));
     await sendWhatsAppMessage(
       phone,
       "This WhatsApp link is invalid or has expired. Please open the course page and tap *Start on WhatsApp* again.",
     );
     return;
   }
+  console.log('[handleStart] ✅ token found | course_slug:', tokenRow.course_slug, '| creator_id:', tokenRow.creator_id, '| used:', tokenRow.used, '| expires_at:', tokenRow.expires_at);
 
   const courseSlugOrId = tokenRow.course_slug;
 
@@ -221,14 +231,15 @@ async function handleStart(phone, token) {
   }
 
   if (!course) {
+    console.warn('[handleStart] ❌ course not found for:', courseSlugOrId);
     await sendWhatsAppMessage(phone, "This course is no longer available.");
-    // Mark token used so it cannot be retried
     await supabase
       .from("whatsapp_tokens")
       .update({ used: true, used_at: new Date().toISOString() })
       .eq("id", tokenRow.id);
     return;
   }
+  console.log('[handleStart] ✅ course found:', course.name, '| id:', course.id);
 
   // 3. Upsert student record
   let student = null;
@@ -245,6 +256,7 @@ async function handleStart(phone, token) {
   }
 
   if (!student) {
+    console.log('[handleStart] step 3 — inserting new student | email:', tokenRow.student_email);
     const { data: inserted, error: insertErr } = await supabase
       .from("students")
       .insert({
@@ -255,7 +267,8 @@ async function handleStart(phone, token) {
       .select("id")
       .single();
     if (insertErr) {
-      console.error("[handleStart] student insert error:", insertErr.message);
+      console.error("[handleStart] ❌ student insert error:", insertErr.message, '| code:', insertErr.code);
+
       await sendWhatsAppMessage(
         phone,
         "Something went wrong linking your account. Please try the link again.",
@@ -265,12 +278,9 @@ async function handleStart(phone, token) {
     student = inserted;
   }
 
-  // IMPORTANT: Always use the actual WhatsApp sender phone for the enrollment.
-  // This ensures getEnrollment(phone) works correctly in all subsequent commands.
-  // tokenRow.student_phone is only used to look up an existing student record.
   const isPaid = Boolean(tokenRow.payment_id);
-  // Use actual WhatsApp phone as the enrollment identifier, fall back to email for free-only courses
   const phoneOrEmail = String(phone);
+  console.log('[handleStart] step 4 — student id:', student?.id, '| isPaid:', isPaid, '| phoneOrEmail:', phoneOrEmail);
 
   // 4. Find existing enrollment by every identifier before inserting
   let existingEnrollment = null;
@@ -347,23 +357,27 @@ async function handleStart(phone, token) {
 
   // 6. Only mark token used AFTER enrollment is confirmed
   if (enrollError || !enrollmentId) {
-    console.error("[handleStart] enrollment upsert failed:", enrollError?.message);
+    console.error("[handleStart] ❌ enrollment upsert FAILED | error:", enrollError?.message, '| code:', enrollError?.code, '| details:', enrollError?.details);
+    console.error("[handleStart] ❌ was this an existing enrollment update?", Boolean(existingEnrollment), '| enrollmentId:', enrollmentId);
     await sendWhatsAppMessage(
       phone,
       "Something went wrong saving your enrollment. Please tap the link again — your access token is still valid.",
     );
     return;
   }
+  console.log('[handleStart] ✅ enrollment upserted | id:', enrollmentId);
 
   await supabase
     .from("whatsapp_tokens")
     .update({ used: true, used_at: now, student_id: student?.id })
     .eq("id", tokenRow.id);
 
+  console.log('[handleStart] ✅ all done — sending success message to', phone);
   await sendWhatsAppMessage(
     phone,
     "✅ You're connected! Send /lesson to start learning!",
   );
+  console.log('[handleStart] ✅ success message dispatched');
 }
 
 async function markDone(phone, lessonNumber) {
