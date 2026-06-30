@@ -34,6 +34,21 @@ const LESSON_LINK_SECRET =
   process.env.LESSON_LINK_SECRET ||
   WEBHOOK_SECRET;
 
+// Mirrors course-web/src/lib/phone.ts — always normalize before reading OR
+// writing the `phone` column on enrollments/students/whatsapp_tokens.
+// Twilio sends numbers as "whatsapp:+919306385029"; once that prefix is
+// stripped, the remaining "+919306385029" still doesn't match what
+// course-web's payment webhook stores ("919306385029", digits only).
+// That mismatch was silently creating duplicate enrollment rows for the
+// same student and intermittently breaking enrollment lookups/inserts.
+// Outbound Twilio messages still need the original "+"-prefixed `phone`
+// variable — only DB reads/writes go through this.
+function normalizePhone(raw) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/\D/g, "");
+  return digits || null;
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -181,7 +196,7 @@ async function getEnrollment(phone) {
     supabase
       .from("enrollments")
       .select("*, courses:course_uuid(*)")
-      .eq("phone", String(phone))
+      .eq("phone", normalizePhone(phone) || String(phone))
       .order("enrolled_at", { ascending: false }),
   );
 }
@@ -266,20 +281,40 @@ async function handleStart(phone, token) {
       })
       .select("id")
       .single();
-    if (insertErr) {
-      console.error("[handleStart] ❌ student insert error:", insertErr.message, '| code:', insertErr.code);
 
+    if (insertErr?.code === "23505") {
+      // Race with the website (razorpay/verify or webhook) inserting a
+      // student with this same phone/email moments earlier. Use that row
+      // instead of failing the whole /start flow over it.
+      console.warn("[handleStart] student insert raced — re-fetching existing row | phone:", tokenRow.student_phone, "| email:", tokenRow.student_email);
+      let raced = null;
+      if (tokenRow.student_phone) {
+        const { data } = await supabase.from("students").select("id").eq("phone", tokenRow.student_phone).limit(1);
+        raced = data?.[0] || null;
+      }
+      if (!raced && tokenRow.student_email) {
+        const { data } = await supabase.from("students").select("id").eq("email", tokenRow.student_email).limit(1);
+        raced = data?.[0] || null;
+      }
+      if (!raced) {
+        await sendWhatsAppMessage(phone, "Something went wrong linking your account. Please try the link again.");
+        return;
+      }
+      student = raced;
+    } else if (insertErr) {
+      console.error("[handleStart] ❌ student insert error:", insertErr.message, '| code:', insertErr.code);
       await sendWhatsAppMessage(
         phone,
         "Something went wrong linking your account. Please try the link again.",
       );
       return;
+    } else {
+      student = inserted;
     }
-    student = inserted;
   }
 
   const isPaid = Boolean(tokenRow.payment_id);
-  const phoneOrEmail = String(phone);
+  const phoneOrEmail = normalizePhone(phone) || String(phone);
   console.log('[handleStart] step 4 — student id:', student?.id, '| isPaid:', isPaid, '| phoneOrEmail:', phoneOrEmail);
 
   // 4. Find existing enrollment by every identifier before inserting
