@@ -19,6 +19,15 @@ function init({ supabase, sendMessage, config }) {
   _config = config
 }
 
+// Mirrors course-web/src/lib/phone.ts — digits only, no "+" or spaces.
+// Must normalize here too because `phone` arrives from Twilio as
+// "+919306385029" but the DB stores "919306385029".
+function normalizePhone(raw) {
+  if (!raw) return null
+  const digits = String(raw).replace(/\D/g, '')
+  return digits || null
+}
+
 // ── Signing (mirrors lib/signer.ts) ───────────────────────────────────────
 function signLessonPageUrl(courseId, lessonId, lessonNum, phone) {
   const TTL = 2 * 60 * 60 * 1000 // 2 hours
@@ -79,7 +88,7 @@ async function sendLesson(phone) {
   const { data: enrollments, error: enrollErr } = await _supabase
     .from('enrollments')
     .select('*, courses:course_uuid(*)')
-    .eq('phone', String(phone))
+    .eq('phone', normalizePhone(phone) || String(phone))
     .order('enrolled_at', { ascending: false })
     .limit(1)
 
