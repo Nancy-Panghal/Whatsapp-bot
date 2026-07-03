@@ -603,7 +603,8 @@ async function handleIncomingMessage(req) {
 
     console.log('[handleIncomingMessage] received message from:', phone, 'text:', text);
 
-    if (hasPendingSubmission(phone)) {
+    const hasPending = await hasPendingSubmission(phone);
+    if (hasPending) {
       if (text && !text.startsWith('/')) {
         return submitAssignmentText(phone, text);
       }
@@ -625,11 +626,12 @@ async function handleIncomingMessage(req) {
       return sendProgress(phone);
     }
     if (text === '/cancel' || text.toLowerCase() === 'cancel') {
-      if (hasPendingSubmission(phone)) {
-        cancelPending(phone);
-        return sendWhatsAppMessage(phone, 'Assignment submission cancelled.');
+      if (hasPending) {
+        await cancelPending(phone);
+      } else {
+        await sendWhatsAppMessage(phone, 'Nothing to cancel.');
       }
-      return sendWhatsAppMessage(phone, 'Nothing to cancel.');
+      return;
     }
     if (text.startsWith('done:')) {
       const lessonNumber = Number(text.replace('done:', ''));
@@ -658,11 +660,74 @@ async function handleIncomingMessage(req) {
   }
 }
 
+// Validate Twilio webhook signature
+function validateTwilioSignature(req, authToken) {
+  const twilioSignature = req.get('X-Twilio-Signature');
+  if (!twilioSignature) return false;
+
+  // Get full URL including protocol, host, path, and query params
+  const protocol = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('x-forwarded-host') || req.get('Host');
+  const fullUrl = `${protocol}://${host}${req.originalUrl}`;
+
+  // Build params object
+  const params = { ...req.body };
+
+  // Sort params alphabetically
+  const sortedKeys = Object.keys(params).sort();
+  let data = fullUrl;
+  for (const key of sortedKeys) {
+    data += key + params[key];
+  }
+
+  // Compute HMAC-SHA1
+  const hmac = crypto.createHmac('sha1', authToken);
+  hmac.update(Buffer.from(data, 'utf-8'));
+  const computedSignature = hmac.digest('base64');
+
+  // Timing-safe comparison
+  return crypto.timingSafeEqual(
+    Buffer.from(computedSignature),
+    Buffer.from(twilioSignature)
+  );
+}
+
 // Webhook endpoint for Twilio — must match what you set in Twilio Console Sandbox Settings
 app.post("/webhook/whatsapp", async (req, res) => {
-  // Respond to Twilio immediately with 200 OK
-  res.status(200).send('<Response></Response>');
   try {
+    // Verify signature first
+    if (TWILIO_AUTH_TOKEN) {
+      const isValid = validateTwilioSignature(req, TWILIO_AUTH_TOKEN);
+      if (!isValid) {
+        console.error('[webhook/whatsapp] ❌ Invalid Twilio signature');
+        return res.status(403).send('Forbidden');
+      }
+      console.log('[webhook/whatsapp] ✅ Twilio signature valid');
+    }
+
+    // Idempotency check
+    const messageSid = req.body.MessageSid;
+    if (messageSid) {
+      // Check if we've already processed this message
+      const { data: existing } = await supabase
+        .from('webhook_processed_messages')
+        .select('message_sid')
+        .eq('message_sid', messageSid)
+        .maybeSingle();
+
+      if (existing) {
+        console.log('[webhook/whatsapp] ℹ️ Already processed message SID:', messageSid);
+        return res.status(200).send('<Response></Response>');
+      }
+
+      // Mark as processed immediately
+      await supabase.from('webhook_processed_messages').insert({
+        message_sid: messageSid
+      });
+    }
+
+    // Respond to Twilio immediately with 200 OK
+    res.status(200).send('<Response></Response>');
     await handleIncomingMessage(req);
   } catch (err) {
     console.error("WhatsApp webhook error:", err.message);

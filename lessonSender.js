@@ -74,7 +74,7 @@ function escMd(text) {
 // ── Main sendLesson ─────────────────────────────────────────────────────────
 async function sendLesson(phone) {
   // 1. Rate limit
-  const { limited, retryAfterSeconds } = checkRateLimit(phone)
+  const { limited, retryAfterSeconds } = await checkRateLimit(phone)
   if (limited) {
     const mins = Math.ceil(retryAfterSeconds / 60)
     await _sendMessage(

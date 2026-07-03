@@ -24,9 +24,6 @@ const MIME_TO_EXT = {
 
 let _supabase, _sendMessage, _config
 
-/** phone -> pending submission context */
-const pendingSubmissions = new Map()
-
 function initAssignmentSender({ supabase, sendMessage, config }) {
   _supabase = supabase
   _sendMessage = sendMessage
@@ -207,14 +204,26 @@ async function beginAssignmentSubmit(phone, lessonOrderNum) {
     return
   }
 
-  pendingSubmissions.set(String(phone), {
-    lessonOrderNum,
-    lessonId: lesson.id,
-    courseId: enrollment.course_uuid,
-    enrollmentId: enrollment.id,
-    creatorId: enrollment.creator_id,
-    studentId: enrollment.student_id,
-  })
+  // Upsert pending submission into the database
+  const { error: upsertError } = await _supabase
+    .from('pending_submissions')
+    .upsert({
+      lesson_order_num: lessonOrderNum,
+      lesson_id: lesson.id,
+      course_id: enrollment.course_uuid,
+      enrollment_id: enrollment.id,
+      creator_id: enrollment.creator_id,
+      student_id: enrollment.student_id,
+    }, {
+      onConflict: 'student_id, lesson_id'
+    })
+    .select()
+
+  if (upsertError) {
+    console.error('[beginAssignmentSubmit] error:', upsertError)
+    await _sendMessage(phone, 'Something went wrong. Please try again later.')
+    return
+  }
 
   await _sendMessage(
     phone,
@@ -245,12 +254,57 @@ async function uploadBufferToStorage(buffer, ext, courseId, enrollmentId, lesson
   return urlData.publicUrl
 }
 
-async function finalizeSubmission(phone, pending, { submissionText, submissionUrl }) {
-  const key = String(phone)
+async function getPendingSubmission(phone) {
+  const { data: enrollment } = await _supabase
+    .from('enrollments')
+    .select('id, student_id')
+    .eq('phone', String(phone))
+    .order('enrolled_at', { ascending: false })
+    .limit(1)
 
+  if (!enrollment || enrollment.length === 0) return null
+
+  const { data, error } = await _supabase
+    .from('pending_submissions')
+    .select('*')
+    .eq('student_id', enrollment[0].student_id)
+    .maybeSingle()
+
+  if (error || !data) return null
+
+  // Convert snake_case to camelCase
+  return {
+    lessonOrderNum: data.lesson_order_num,
+    lessonId: data.lesson_id,
+    courseId: data.course_id,
+    enrollmentId: data.enrollment_id,
+    creatorId: data.creator_id,
+    studentId: data.student_id,
+    id: data.id,
+    createdAt: data.created_at,
+  }
+}
+
+async function deletePendingSubmission(phone) {
+  const { data: enrollment } = await _supabase
+    .from('enrollments')
+    .select('id, student_id')
+    .eq('phone', String(phone))
+    .order('enrolled_at', { ascending: false })
+    .limit(1)
+
+  if (!enrollment || enrollment.length === 0) return
+
+  await _supabase
+    .from('pending_submissions')
+    .delete()
+    .eq('student_id', enrollment[0].student_id)
+}
+
+async function finalizeSubmission(phone, pending, { submissionText, submissionUrl }) {
   const existing = await hasSubmission(pending.enrollmentId, pending.lessonId)
   if (existing) {
-    pendingSubmissions.delete(key)
+    await deletePendingSubmission(phone)
     await _sendMessage(phone, 'You already submitted this assignment.')
     return
   }
@@ -271,7 +325,7 @@ async function finalizeSubmission(phone, pending, { submissionText, submissionUr
     return
   }
 
-  pendingSubmissions.delete(key)
+  await deletePendingSubmission(phone)
 
   const lesson = await getLesson(pending.courseId, pending.lessonOrderNum)
   await notifyCreator(pending.creatorId, lesson || { title: '' }, pending.lessonOrderNum)
@@ -284,8 +338,7 @@ async function finalizeSubmission(phone, pending, { submissionText, submissionUr
 }
 
 async function submitAssignmentText(phone, text) {
-  const key = String(phone)
-  const pending = pendingSubmissions.get(key)
+  const pending = await getPendingSubmission(phone)
   if (!pending) return false
 
   const trimmed = String(text || '').trim()
@@ -302,12 +355,14 @@ async function submitAssignmentText(phone, text) {
   return true
 }
 
-function cancelPending(phone) {
-  pendingSubmissions.delete(String(phone))
+async function cancelPending(phone) {
+  await deletePendingSubmission(phone)
+  await _sendMessage(phone, 'Assignment submission cancelled.')
 }
 
-function hasPendingSubmission(phone) {
-  return pendingSubmissions.has(String(phone))
+async function hasPendingSubmission(phone) {
+  const pending = await getPendingSubmission(phone)
+  return !!pending
 }
 
 module.exports = {
