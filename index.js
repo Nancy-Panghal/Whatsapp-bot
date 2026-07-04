@@ -34,6 +34,16 @@ const LESSON_LINK_SECRET =
   process.env.LESSON_LINK_SECRET ||
   WEBHOOK_SECRET;
 
+// Twilio Content Template SIDs for post-lesson-completion Quick Reply buttons.
+// Create these in Twilio Console > Content Editor (type: Quick Reply) and get
+// them WhatsApp-approved, then set these env vars. Until both are set, the bot
+// automatically falls back to the existing plain-text menu — nothing breaks.
+// Body text should include a {{1}} placeholder for the lesson number.
+//   Template A (with quiz)    buttons: "Take Quiz", "Next Lesson", "Progress"
+//   Template B (without quiz) buttons: "Next Lesson", "Progress"
+const CONTENT_SID_LESSON_DONE_QUIZ = process.env.TWILIO_CONTENT_SID_LESSON_DONE_QUIZ || "";
+const CONTENT_SID_LESSON_DONE = process.env.TWILIO_CONTENT_SID_LESSON_DONE || "";
+
 // Mirrors course-web/src/lib/phone.ts — always normalize before reading OR
 // writing the `phone` column on enrollments/students/whatsapp_tokens.
 // Twilio sends numbers as "whatsapp:+919306385029"; once that prefix is
@@ -135,6 +145,42 @@ async function sendWhatsAppMessage(toPhone, text, keyboard) {
     console.error('[sendWhatsAppMessage] Twilio more info:', errData?.more_info || '(none)');
   }
 }
+
+// Sends a pre-approved Twilio Content Template (used for Quick Reply buttons).
+// Returns true on success, false on failure — caller should fall back to
+// sendWhatsAppMessage(text) on false so the student never gets left with nothing.
+async function sendWhatsAppButtons(toPhone, contentSid, contentVariables) {
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+
+  const body = {
+    From: TWILIO_WHATSAPP_NUMBER,
+    To: toPhone.startsWith('whatsapp:') ? toPhone : `whatsapp:${toPhone}`,
+    ContentSid: contentSid,
+  };
+  if (contentVariables) {
+    body.ContentVariables = JSON.stringify(contentVariables);
+  }
+
+  try {
+    const resp = await axios.post(twilioUrl, new URLSearchParams(body), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${auth}`,
+      },
+      timeout: 10000,
+    });
+    console.log('[sendWhatsAppButtons] ✅ sent to', toPhone, '| status:', resp.status, '| sid:', resp.data?.sid);
+    return true;
+  } catch (err) {
+    const errData = err.response?.data;
+    console.error('[sendWhatsAppButtons] ❌ FAILED to', toPhone);
+    console.error('[sendWhatsAppButtons] Twilio error code:', errData?.code, '| message:', errData?.message || err.message);
+    return false;
+  }
+}
+
+
 
 function slugify(text) {
   return String(text || "")
@@ -619,11 +665,19 @@ async function handleIncomingMessage(req) {
       }
       return handleStart(phone, token);
     }
-    if (text === '/lesson' || text.toLowerCase() === 'lesson') {
+    if (text === '/lesson' || text.toLowerCase() === 'lesson' || text.toLowerCase() === 'next lesson') {
       return sendLesson(phone);
     }
     if (text === '/progress' || text.toLowerCase() === 'progress') {
       return sendProgress(phone);
+    }
+    if (text.toLowerCase() === 'take quiz') {
+      // Button has no lesson number attached — the quiz is always for the
+      // lesson that was just completed, i.e. one behind current_lesson
+      // (markDone advances current_lesson to lessonNum + 1 on completion).
+      const enrollment = await getEnrollment(phone);
+      const justCompleted = Math.max((enrollment?.current_lesson || 2) - 1, 1);
+      return sendQuiz(phone, justCompleted);
     }
     if (text === '/cancel' || text.toLowerCase() === 'cancel') {
       if (hasPending) {
