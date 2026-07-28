@@ -9,10 +9,14 @@
  */
 
 const crypto = require('crypto')
-const { createClient } = require('@supabase/supabase-js')
 
-// Default supabase instance — will be overridden by init()
-let _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
+// No default client is created here anymore — the old version eagerly
+// called createClient() at module-load time using process.env.SUPABASE_KEY
+// (a var name that doesn't match SUPABASE_SERVICE_ROLE_KEY used everywhere
+// else in this repo), which crashed the whole process on boot before
+// initWatermark() ever got the chance to override it with the real client.
+// _supabase now starts null and is only ever set via init().
+let _supabase = null
 
 /**
  * Initialize watermark module with the shared Supabase instance.
