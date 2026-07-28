@@ -934,6 +934,8 @@ app.get('/webhook/whatsapp', (req, res) => {
 // Meta App Dashboard > WhatsApp > Configuration > Webhook URL.
 app.post("/webhook/whatsapp", async (req, res) => {
   try {
+    console.log('[webhook/whatsapp] 📩 raw payload:', JSON.stringify(req.body));
+
     if (META_APP_SECRET) {
       const isValid = validateMetaSignature(req, META_APP_SECRET);
       if (!isValid) {
@@ -944,8 +946,15 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
     res.sendStatus(200); // ack immediately — Meta retries hard on non-200/timeout
 
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message) return; // status callback (sent/delivered/read) — nothing to do
+    const value = req.body.entry?.[0]?.changes?.[0]?.value;
+    const message = value?.messages?.[0];
+    if (!message) {
+      const statuses = value?.statuses;
+      if (statuses) {
+        console.log('[webhook/whatsapp] 📬 status update:', JSON.stringify(statuses));
+      }
+      return; // status callback (sent/delivered/read) — nothing to do
+    }
 
     // Idempotency check — WAMID plays the same role Twilio's MessageSid did
     const messageId = message.id;
