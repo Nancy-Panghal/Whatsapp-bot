@@ -11,12 +11,16 @@ const axios = require('axios')
 const { checkRateLimit, logLessonAccess } = require('./watermark')
 const { getRequiredAssignmentBlock } = require('./assignmentSender')
 
-let _supabase, _sendMessage, _config
+let _supabase, _sendMessage, _config, _buildLessonMenuKeyboard
 
-function init({ supabase, sendMessage, config }) {
+// buildLessonMenuKeyboard is injected from index.js so both files share the
+// exact same Next/Previous/Activities-or-MyCourses button logic — no
+// duplicated layout code to drift out of sync.
+function init({ supabase, sendMessage, config, buildLessonMenuKeyboard }) {
   _supabase = supabase
   _sendMessage = sendMessage
   _config = config
+  _buildLessonMenuKeyboard = buildLessonMenuKeyboard
 }
 
 // Mirrors course-web/src/lib/phone.ts — digits only, no "+" or spaces.
@@ -119,7 +123,7 @@ async function sendLesson(phone) {
       `🔒 *Assignment required*\n\nComplete the assignment for Lesson ${assignmentBlock.prevLessonNum} before continuing.\n\n${escMd(String(assignmentBlock.prompt).slice(0, 400))}`,
       {
         inline_keyboard: [
-          [{ text: '📝 Submit Assignment', callback_data: `assign:${assignmentBlock.prevLessonNum}` }],
+          [{ text: '📝 Submit HW', callback_data: `assign:${assignmentBlock.prevLessonNum}` }],
         ],
       },
     )
@@ -132,8 +136,8 @@ async function sendLesson(phone) {
     const courseUrl = `${_config.ACADEMYKIT_URL}/about-course/${slugify(course.host_name || 'creator')}/${slugify(course.name || course.slug || 'course')}/${course.id}`
     await _sendMessage(
       phone,
-      `🔒 *Free preview complete.*\n\nUnlock the full course to continue learning.`,
-      { inline_keyboard: [[{ text: 'Pay and unlock course', url: courseUrl }]] }
+      `🔒 *Free preview complete.*\n\nYou'll need to pay to continue this course.`,
+      { inline_keyboard: [[{ text: 'Pay Now', url: courseUrl }]] }
     )
     return
   }
@@ -196,18 +200,11 @@ async function sendLesson(phone) {
     fp,
   ].join('\n')
 
-  const keyboard = [
-    [{ text: '▶ Open Lesson', url: lessonUrl }],
-    [
-      { text: '✅ Mark Done', callback_data: `done:${lesson.order_num}` },
-      { text: '📊 Progress', callback_data: 'progress' },
-    ],
-  ]
-  if (lesson.order_num > 1) {
-    keyboard.push([{ text: '⬅ Previous Lesson', callback_data: `goto:${lesson.order_num - 1}` }])
-  }
+  const keyboard = { inline_keyboard: [[{ text: '▶ Open Lesson', url: lessonUrl }]] }
+  const menu = await _buildLessonMenuKeyboard(_supabase, enrollment, lesson)
+  keyboard.inline_keyboard.push(...menu.inline_keyboard)
 
-  await _sendMessage(phone, text, { inline_keyboard: keyboard })
+  await _sendMessage(phone, text, keyboard)
 
   // Update last_accessed (non-blocking)
   _supabase

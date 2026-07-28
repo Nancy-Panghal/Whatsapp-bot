@@ -167,7 +167,7 @@ async function sendAssignmentPrompt(phone, lessonOrderNum) {
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: '📝 Submit Assignment', callback_data: `assign:${lessonOrderNum}` }],
+      [{ text: '📝 Submit HW', callback_data: `assign:${lessonOrderNum}` }],
     ],
   }
 
