@@ -21,6 +21,16 @@ const {
 } = require("./assignmentSender");
 
 const app = express();
+
+// DIAGNOSTIC — logs the bare fact that a request arrived, before any body
+// parsing, signature checks, or routing. If a request from Meta doesn't
+// show up here, it never reached this server at all — the problem is
+// upstream (Meta not sending it, Render not routing it), not in this code.
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.originalUrl} | content-type: ${req.get("content-type") || "none"}`);
+  next();
+});
+
 app.use(express.json({
   limit: "2mb",
   verify: (req, res, buf) => { req.rawBody = buf; },
@@ -933,28 +943,29 @@ app.get('/webhook/whatsapp', (req, res) => {
 // Webhook endpoint for Meta — must match what's configured in
 // Meta App Dashboard > WhatsApp > Configuration > Webhook URL.
 app.post("/webhook/whatsapp", async (req, res) => {
+  console.log("[webhook/whatsapp] POST received | rawBody present:", Boolean(req.rawBody), "| rawBody length:", req.rawBody?.length || 0);
   try {
-    console.log('[webhook/whatsapp] 📩 raw payload:', JSON.stringify(req.body));
-
     if (META_APP_SECRET) {
       const isValid = validateMetaSignature(req, META_APP_SECRET);
+      console.log("[webhook/whatsapp] signature check:", isValid ? "✅ valid" : "❌ INVALID");
       if (!isValid) {
-        console.error('[webhook/whatsapp] ❌ Invalid Meta signature');
+        console.error('[webhook/whatsapp] ❌ Invalid Meta signature — X-Hub-Signature-256 header present:', Boolean(req.get('X-Hub-Signature-256')));
         return res.status(403).send('Forbidden');
       }
+    } else {
+      console.warn("[webhook/whatsapp] ⚠️ META_APP_SECRET not set — skipping signature check entirely");
     }
 
     res.sendStatus(200); // ack immediately — Meta retries hard on non-200/timeout
 
-    const value = req.body.entry?.[0]?.changes?.[0]?.value;
-    const message = value?.messages?.[0];
+    console.log("[webhook/whatsapp] payload:", JSON.stringify(req.body).slice(0, 2000));
+
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) {
-      const statuses = value?.statuses;
-      if (statuses) {
-        console.log('[webhook/whatsapp] 📬 status update:', JSON.stringify(statuses));
-      }
-      return; // status callback (sent/delivered/read) — nothing to do
+      console.log("[webhook/whatsapp] no message in payload — likely a status callback (sent/delivered/read), or a Meta test payload with a different shape");
+      return;
     }
+    console.log("[webhook/whatsapp] message extracted, id:", message.id, "| type:", message.type, "| from:", message.from);
 
     // Idempotency check — WAMID plays the same role Twilio's MessageSid did
     const messageId = message.id;
@@ -974,7 +985,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
     await handleIncomingMessage(message);
   } catch (err) {
-    console.error("WhatsApp webhook error:", err.message);
+    console.error("[webhook/whatsapp] ❌ unhandled error:", err.message, err.stack);
   }
 });
 
@@ -1074,4 +1085,24 @@ setInterval(pollLiveClassReminders, 5 * 60 * 1000);
 pollLiveClassReminders(); // also run once at startup instead of waiting 5 min for the first check
 
 const PORT = process.env.PORT || 3003;
+
+// DIAGNOSTIC — catches any request that didn't match a real route above.
+// If Meta is somehow hitting a slightly different path (trailing slash,
+// typo in the Callback URL, etc.), this logs it instead of just returning
+// a silent 404 with nothing in the logs.
+app.use((req, res) => {
+  console.log(`[404] No route matched: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: "Not found" });
+});
+
+// DIAGNOSTIC — global error handler, must be defined last and take 4 args
+// for Express to recognize it as an error handler. Catches anything that
+// throws outside an individual route's own try/catch (e.g. in middleware)
+// so it shows up in logs instead of Express silently sending its default
+// error page.
+app.use((err, req, res, next) => {
+  console.error(`[UNHANDLED ERROR] ${req.method} ${req.originalUrl}:`, err.message, err.stack);
+  if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+});
+
 app.listen(PORT, () => console.log(`WhatsApp bot running on port ${PORT}`));
