@@ -75,6 +75,7 @@ initWatermark(supabase);
 initLessonSender({
   supabase,
   sendMessage: async (phone, text, keyboard, opts) => sendWhatsAppMessage(phone, text, keyboard, opts),
+  sendCtaUrlButton: async (phone, bodyText, buttonText, targetUrl) => sendCtaUrlButton(phone, bodyText, buttonText, targetUrl),
   buildLessonMenuKeyboard,
   config: {
     WHATSAPP_LINK_SECRET: LESSON_LINK_SECRET,
@@ -202,6 +203,50 @@ async function sendWhatsAppMessage(toPhone, text, keyboard, opts) {
   }
 }
 
+// A real WhatsApp "CTA URL" message — ONE clean button showing only the
+// label text (e.g. "▶ Open Lesson"), with the actual URL fully hidden
+// behind it — no ugly raw link ever appears in the chat. This is the
+// ONLY WhatsApp message type that can hide a link this way.
+//
+// Trade-off: this message type can only ever contain this single button —
+// WhatsApp doesn't allow mixing a cta_url button with reply buttons
+// (Next Lesson, Activities, etc.) in the same message the way Telegram
+// does. So lesson delivery is now two messages: this one (just the link),
+// then a normal follow-up sendWhatsAppMessage() with the Next/Previous/
+// Activities-or-My Courses reply buttons.
+async function sendCtaUrlButton(toPhone, bodyText, buttonText, targetUrl) {
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
+  const to = String(toPhone).replace(/\D/g, "");
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "cta_url",
+      body: { text: bodyText },
+      action: {
+        name: "cta_url",
+        parameters: { display_text: buttonText.slice(0, 20), url: targetUrl },
+      },
+    },
+  };
+
+  try {
+    const resp = await axios.post(url, payload, {
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${META_WHATSAPP_TOKEN}` },
+      timeout: 10000,
+    });
+    console.log("[sendCtaUrlButton] ✅ sent to", to, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
+    return true;
+  } catch (err) {
+    const errData = err.response?.data;
+    console.error("[sendCtaUrlButton] ❌ FAILED to", to);
+    console.error("[sendCtaUrlButton] Meta error:", JSON.stringify(errData?.error || err.message));
+    return false;
+  }
+}
+
 // Proactive messages (the student hasn't necessarily messaged the bot in
 // the last 24 hours) MUST use a pre-approved Meta Message Template —
 // freeform text gets rejected outside that window. Used for live-class
@@ -291,17 +336,22 @@ function lessonAllowed(enrollment, lessonNumber) {
   );
 }
 
-// A lesson has "activities" if it carries anything beyond its main
-// video/pdf/live content — notes, a summary, a quiz, or an assignment.
-// NOTE: this is independent of content_type — a normal video lesson can
-// have a quiz attached, and a content_type === 'quiz' lesson (the quiz
-// IS the lesson) is handled the same way the video/pdf lesson is; this
-// flag is only about whether the *extra* Activities dropdown should show.
+// A lesson has "activities" only when it carries something EXTRA beyond
+// its own primary content — e.g. a video/pdf/live lesson that also has a
+// quiz, notes, or assignment attached to it.
+//
+// A lesson whose content_type IS 'quiz' or 'assignment' stores its own
+// body in these same columns (quiz_questions / assignment_prompt) — that
+// is the lesson, not an attachment to it, so it must NOT trigger the
+// Activities dropdown pointing back at itself. Those lesson types get
+// delivered as a normal lesson (open the link, watch/take it), exactly
+// like a video or pdf lesson — Activities is strictly for the extras
+// hanging off a lesson, never for the lesson's own type.
 function lessonHasActivities(lesson) {
   if (!lesson) return false;
   const hasNotes = Boolean(lesson.notes_url || lesson.summary_url);
-  const hasQuiz = Array.isArray(lesson.quiz_questions) && lesson.quiz_questions.length > 0;
-  const hasAssignment = Boolean(lesson.assignment_prompt || lesson.assignment_file_url);
+  const hasQuiz = lesson.content_type !== "quiz" && Array.isArray(lesson.quiz_questions) && lesson.quiz_questions.length > 0;
+  const hasAssignment = lesson.content_type !== "assignment" && Boolean(lesson.assignment_prompt || lesson.assignment_file_url);
   return hasNotes || hasQuiz || hasAssignment;
 }
 
@@ -352,14 +402,14 @@ async function sendActivitiesMenu(supabase, phone, enrollment, lessonOrderNum) {
   const lesson = await firstRow(
     supabase
       .from("lessons")
-      .select("id, title, order_num, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
+      .select("id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
       .eq("course_id", enrollment.course_uuid)
       .eq("order_num", lessonOrderNum)
       .eq("is_published", true),
   );
 
   if (!lesson || !lessonHasActivities(lesson)) {
-    await sendWhatsAppMessage(phone, `No extra activities for Lesson ${lessonOrderNum}.`);
+    await sendWhatsAppMessage(phone, `ℹ️ No extra activities for *Lesson ${lessonOrderNum}* yet.`);
     return;
   }
 
@@ -393,7 +443,7 @@ async function sendNotesForLesson(supabase, phone, enrollment, lessonOrderNum) {
   );
 
   if (!lesson || (!lesson.summary_url && !lesson.notes_url)) {
-    await sendWhatsAppMessage(phone, `No notes for Lesson ${lessonOrderNum} yet.`);
+    await sendWhatsAppMessage(phone, `ℹ️ No notes for *Lesson ${lessonOrderNum}* yet.`);
     return;
   }
 
@@ -466,7 +516,7 @@ async function handleStart(phone, token) {
     console.warn('[handleStart] ❌ token not found or already used or expired:', token.slice(0, 16));
     await sendWhatsAppMessage(
       phone,
-      "This WhatsApp link is invalid or has expired. Please open the course page and tap *Start on WhatsApp* again.",
+      "⚠️ This WhatsApp link is invalid or has expired. Please open the course page and tap *Start on WhatsApp* again.",
     );
     return;
   }
@@ -486,7 +536,7 @@ async function handleStart(phone, token) {
 
   if (!course) {
     console.warn('[handleStart] ❌ course not found for:', courseSlugOrId);
-    await sendWhatsAppMessage(phone, "This course is no longer available.");
+    await sendWhatsAppMessage(phone, "⚠️ This course is no longer available.");
     await supabase
       .from("whatsapp_tokens")
       .update({ used: true, used_at: new Date().toISOString() })
@@ -536,7 +586,7 @@ async function handleStart(phone, token) {
         raced = data?.[0] || null;
       }
       if (!raced) {
-        await sendWhatsAppMessage(phone, "Something went wrong linking your account. Please try the link again.");
+        await sendWhatsAppMessage(phone, "⚠️ Something went wrong linking your account. Please try the link again.");
         return;
       }
       student = raced;
@@ -544,7 +594,7 @@ async function handleStart(phone, token) {
       console.error("[handleStart] ❌ student insert error:", insertErr.message, '| code:', insertErr.code);
       await sendWhatsAppMessage(
         phone,
-        "Something went wrong linking your account. Please try the link again.",
+        "⚠️ Something went wrong linking your account. Please try the link again.",
       );
       return;
     } else {
@@ -635,7 +685,7 @@ async function handleStart(phone, token) {
     console.error("[handleStart] ❌ was this an existing enrollment update?", Boolean(existingEnrollment), '| enrollmentId:', enrollmentId);
     await sendWhatsAppMessage(
       phone,
-      "Something went wrong saving your enrollment. Please tap the link again — your access token is still valid.",
+      "⚠️ Something went wrong saving your enrollment. Please tap the link again — your access token is still valid.",
     );
     return;
   }
@@ -649,7 +699,13 @@ async function handleStart(phone, token) {
   console.log('[handleStart] ✅ all done — sending success message to', phone);
   await sendWhatsAppMessage(
     phone,
-    "✅ You're connected! Send /lesson to start learning!",
+    "✅ You're connected! Tap below to start learning.",
+    {
+      inline_keyboard: [
+        [{ text: "▶ Start Lesson 1", callback_data: "lesson" }],
+        [{ text: "📚 My Courses", url: signMyCoursesUrl(String(phone)) }],
+      ],
+    },
   );
   console.log('[handleStart] ✅ success message dispatched');
 }
@@ -657,7 +713,7 @@ async function handleStart(phone, token) {
 async function markDone(phone, lessonNumber) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment || !enrollment.courses) {
-    await sendWhatsAppMessage(phone, "No course connected yet.");
+    await sendWhatsAppMessage(phone, "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.");
     return;
   }
 
@@ -687,7 +743,7 @@ async function markDone(phone, lessonNumber) {
   const lesson = await firstRow(
     supabase
       .from("lessons")
-      .select("id, order_num, summary_url, notes_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
+      .select("id, order_num, content_type, summary_url, notes_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
       .eq("course_id", enrollment.course_uuid)
       .eq("order_num", lessonNumber)
       .eq("is_published", true),
@@ -727,7 +783,7 @@ async function markDone(phone, lessonNumber) {
 async function sendProgress(phone) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment || !enrollment.courses) {
-    await sendWhatsAppMessage(phone, "No course is connected yet.");
+    await sendWhatsAppMessage(phone, "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.");
     return;
   }
 
@@ -737,7 +793,7 @@ async function sendProgress(phone) {
 
   await sendWhatsAppMessage(
     phone,
-    `Progress: ${completed}/${total} lessons complete (${percent}%).\nCurrent lesson: ${enrollment.current_lesson || 1}`,
+    `📊 *Progress:* ${completed}/${total} lessons complete (${percent}%)\nCurrent lesson: *${enrollment.current_lesson || 1}*`,
     { inline_keyboard: [[{ text: '▶ Continue', callback_data: 'lesson' }]] },
   );
 }
@@ -745,7 +801,7 @@ async function sendProgress(phone) {
 async function sendSpecificLesson(phone, lessonOrderNum) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment) {
-    await sendWhatsAppMessage(phone, 'No course connected. Open the course page first.');
+    await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.');
     return;
   }
 
@@ -764,7 +820,7 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
 
   const { data: lessons } = await supabase
     .from('lessons')
-    .select('id, title, order_num, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required')
+    .select('id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required')
     .eq('course_id', enrollment.course_uuid)
     .eq('order_num', lessonOrderNum)
     .eq('is_published', true)
@@ -772,7 +828,7 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
 
   const lesson = lessons?.[0];
   if (!lesson) {
-    await sendWhatsAppMessage(phone, `Lesson ${lessonOrderNum} is not available yet.`);
+    await sendWhatsAppMessage(phone, `⚠️ Lesson ${lessonOrderNum} is not available yet.`);
     return;
   }
 
@@ -802,10 +858,12 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
     ? `🔄 Watching Again: Lesson ${lesson.order_num}: ${escMd(lesson.title)}`
     : `📖 Lesson ${lesson.order_num}: ${escMd(lesson.title)}`;
 
-  const message = `${headerText}\n\nTap the link to open the lesson. Access expires in 2 hours.\n\n• ▶ Open Lesson: ${lessonUrl}\n\n🔒 This link is personal. Do not share it.\n${fp}`;
+  const linkBodyText = `${headerText}\n\nAccess expires in 2 hours.\n\n🔒 This link is personal. Do not share it.\n${fp}`;
+
+  await sendCtaUrlButton(phone, linkBodyText, '▶ Open Lesson', lessonUrl);
 
   const keyboard = await buildLessonMenuKeyboard(supabase, enrollment, lesson);
-  await sendWhatsAppMessage(phone, message, keyboard);
+  await sendWhatsAppMessage(phone, `What's next?`, keyboard);
 
   await supabase
     .from('enrollments')
@@ -857,7 +915,7 @@ async function handleIncomingMessage(metaMessage) {
       if (hasPending) {
         await cancelPending(phone);
       } else {
-        await sendWhatsAppMessage(phone, 'Nothing to cancel.');
+        await sendWhatsAppMessage(phone, 'ℹ️ Nothing to cancel.');
       }
       return;
     }
@@ -880,21 +938,21 @@ async function handleIncomingMessage(metaMessage) {
     if (text.startsWith('activities:')) {
       const lessonNumber = Number(text.replace('activities:', ''));
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'No course connected yet.'); return; }
+      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
       return sendActivitiesMenu(supabase, phone, enrollment, lessonNumber);
     }
     if (text.startsWith('notes:')) {
       const lessonNumber = Number(text.replace('notes:', ''));
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'No course connected yet.'); return; }
+      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
       return sendNotesForLesson(supabase, phone, enrollment, lessonNumber);
     }
     if (text === 'mycourses' || text.toLowerCase() === 'my courses') {
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'No course connected yet.'); return; }
+      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
       await sendWhatsAppMessage(
         phone,
-        '📚 My Courses',
+        '📚 *My Courses*\n\nTap below to see all your enrolled courses and progress.',
         { inline_keyboard: [[{ text: '📚 Open My Courses', url: signMyCoursesUrl(String(enrollment.phone)) }]] },
       );
       return;
@@ -903,7 +961,7 @@ async function handleIncomingMessage(metaMessage) {
     // Default response
     return sendWhatsAppMessage(
       phone,
-      'Welcome! Use these commands:\n• /lesson - Get your next lesson\n• /progress - Check your progress\n• my courses - See all your enrolled courses\n• /cancel - Cancel pending task',
+      '👋 *Welcome to Kurso!*\n\nHere\'s what you can do:\n\n📖 send *lesson* — get your next lesson\n📊 send *progress* — check your progress\n📚 send *my courses* — see all your enrolled courses\n✋ send */cancel* — cancel a pending task',
     );
   } catch (err) {
     console.error('[handleIncomingMessage] unhandled error:', err.message, err.stack);

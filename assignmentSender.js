@@ -185,13 +185,13 @@ async function sendAssignmentPrompt(phone, lessonOrderNum) {
 async function beginAssignmentSubmit(phone, lessonOrderNum) {
   const enrollment = await getEnrollment(phone)
   if (!enrollment) {
-    await _sendMessage(phone, 'No course connected yet.')
+    await _sendMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.')
     return
   }
 
   const lesson = await getLesson(enrollment.course_uuid, lessonOrderNum)
   if (!lesson?.assignment_prompt) {
-    await _sendMessage(phone, 'This lesson has no assignment.')
+    await _sendMessage(phone, 'ℹ️ This lesson has no assignment.')
     return
   }
 
@@ -221,7 +221,7 @@ async function beginAssignmentSubmit(phone, lessonOrderNum) {
 
   if (upsertError) {
     console.error('[beginAssignmentSubmit] error:', upsertError)
-    await _sendMessage(phone, 'Something went wrong. Please try again later.')
+    await _sendMessage(phone, '⚠️ Something went wrong. Please try again later.')
     return
   }
 
@@ -305,7 +305,7 @@ async function finalizeSubmission(phone, pending, { submissionText, submissionUr
   const existing = await hasSubmission(pending.enrollmentId, pending.lessonId)
   if (existing) {
     await deletePendingSubmission(phone)
-    await _sendMessage(phone, 'You already submitted this assignment.')
+    await _sendMessage(phone, 'ℹ️ You already submitted this assignment.')
     return
   }
 
@@ -321,7 +321,7 @@ async function finalizeSubmission(phone, pending, { submissionText, submissionUr
 
   if (insertErr) {
     console.error('[assignmentSender] insert error:', insertErr.message)
-    await _sendMessage(phone, 'Could not save your assignment. Please try again in a few minutes.')
+    await _sendMessage(phone, '⚠️ Could not save your assignment. Please try again in a few minutes.')
     return
   }
 
@@ -343,11 +343,11 @@ async function submitAssignmentText(phone, text) {
 
   const trimmed = String(text || '').trim()
   if (!trimmed) {
-    await _sendMessage(phone, 'Assignment cannot be empty. Type your answer or attach a file, or send /cancel.')
+    await _sendMessage(phone, '⚠️ Assignment cannot be empty. Type your answer or attach a file, or send /cancel.')
     return true
   }
   if (trimmed.length > 2000) {
-    await _sendMessage(phone, 'Text must be 2000 characters or fewer. Please shorten or attach a file instead.')
+    await _sendMessage(phone, '⚠️ Text must be 2000 characters or fewer. Please shorten or attach a file instead.')
     return true
   }
 
@@ -357,7 +357,7 @@ async function submitAssignmentText(phone, text) {
 
 async function cancelPending(phone) {
   await deletePendingSubmission(phone)
-  await _sendMessage(phone, 'Assignment submission cancelled.')
+  await _sendMessage(phone, '🚫 Assignment submission cancelled.')
 }
 
 async function hasPendingSubmission(phone) {

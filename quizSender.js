@@ -59,7 +59,7 @@ async function getEnrollment(phone) {
 async function sendQuiz(phone, lessonOrderNum) {
   const enrollment = await getEnrollment(phone)
   if (!enrollment) {
-    await _sendMessage(phone, 'No course connected yet. Open your course page and tap *Start on WhatsApp* first.')
+    await _sendMessage(phone, 'ℹ️ No course connected yet. Open your course page and tap *Start on WhatsApp* first.')
     return
   }
 
@@ -72,7 +72,7 @@ async function sendQuiz(phone, lessonOrderNum) {
     .limit(1)
 
   if (error || !lessons?.length) {
-    await _sendMessage(phone, 'Lesson not found.')
+    await _sendMessage(phone, '⚠️ Lesson not found.')
     return
   }
 
@@ -80,7 +80,7 @@ async function sendQuiz(phone, lessonOrderNum) {
   const questions = Array.isArray(lesson.quiz_questions) ? lesson.quiz_questions : []
 
   if (questions.length === 0) {
-    await _sendMessage(phone, `No quiz available for *${escMd(lesson.title)}* yet.`)
+    await _sendMessage(phone, `ℹ️ No quiz available for *${escMd(lesson.title)}* yet.`)
     return
   }
 

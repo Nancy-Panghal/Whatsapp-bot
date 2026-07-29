@@ -11,16 +11,17 @@ const axios = require('axios')
 const { checkRateLimit, logLessonAccess } = require('./watermark')
 const { getRequiredAssignmentBlock } = require('./assignmentSender')
 
-let _supabase, _sendMessage, _config, _buildLessonMenuKeyboard
+let _supabase, _sendMessage, _config, _buildLessonMenuKeyboard, _sendCtaUrlButton
 
 // buildLessonMenuKeyboard is injected from index.js so both files share the
 // exact same Next/Previous/Activities-or-MyCourses button logic — no
 // duplicated layout code to drift out of sync.
-function init({ supabase, sendMessage, config, buildLessonMenuKeyboard }) {
+function init({ supabase, sendMessage, config, buildLessonMenuKeyboard, sendCtaUrlButton }) {
   _supabase = supabase
   _sendMessage = sendMessage
   _config = config
   _buildLessonMenuKeyboard = buildLessonMenuKeyboard
+  _sendCtaUrlButton = sendCtaUrlButton
 }
 
 // Mirrors course-web/src/lib/phone.ts — digits only, no "+" or spaces.
@@ -97,7 +98,7 @@ async function sendLesson(phone) {
     .limit(1)
 
   if (enrollErr || !enrollments?.length || !enrollments[0].courses) {
-    await _sendMessage(phone, 'No course connected yet. Open your course page and tap *Start on WhatsApp* first.')
+    await _sendMessage(phone, 'ℹ️ No course connected yet. Open your course page and tap *Start on WhatsApp* first.')
     return
   }
 
@@ -191,20 +192,24 @@ async function sendLesson(phone) {
   const fp = encodeFingerprint(String(phone))
   const durationLine = lesson.duration ? `⏱ ${lesson.duration}\n` : ''
 
-  const text = [
+  const linkBodyText = [
     `📖 *Lesson ${lesson.order_num}: ${escMd(lesson.title)}*`,
     durationLine,
-    `Tap *Open Lesson* below. Your protected access expires in 2 hours.`,
+    `Your protected access expires in 2 hours.`,
     ``,
     `🔒 _This link is personal. Sharing it violates your license agreement._`,
     fp,
   ].join('\n')
 
-  const keyboard = { inline_keyboard: [[{ text: '▶ Open Lesson', url: lessonUrl }]] }
-  const menu = await _buildLessonMenuKeyboard(_supabase, enrollment, lesson)
-  keyboard.inline_keyboard.push(...menu.inline_keyboard)
+  // Two messages: a clean single-button "Open Lesson" link (WhatsApp's
+  // cta_url type hides the raw URL entirely — no ugly link text), then a
+  // normal follow-up with the Next/Previous/Activities-or-MyCourses menu.
+  // These can't be combined into one message — WhatsApp doesn't allow a
+  // cta_url button alongside reply buttons in the same interactive message.
+  await _sendCtaUrlButton(phone, linkBodyText, '▶ Open Lesson', lessonUrl)
 
-  await _sendMessage(phone, text, keyboard)
+  const menu = await _buildLessonMenuKeyboard(_supabase, enrollment, lesson)
+  await _sendMessage(phone, `What's next?`, menu)
 
   // Update last_accessed (non-blocking)
   _supabase
