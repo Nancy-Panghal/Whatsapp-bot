@@ -131,19 +131,8 @@ async function sendLesson(phone) {
     return
   }
 
-  // 3. Free preview check
-  const allowed = isLessonAllowed(enrollment, lessonNum)
-  if (!allowed) {
-    const courseUrl = `${_config.ACADEMYKIT_URL}/about-course/${slugify(course.host_name || 'creator')}/${slugify(course.name || course.slug || 'course')}/${course.id}`
-    await _sendMessage(
-      phone,
-      `🔒 *Free preview complete.*\n\nYou'll need to pay to continue this course.`,
-      { inline_keyboard: [[{ text: 'Pay Now', url: courseUrl }]] }
-    )
-    return
-  }
-
-  // 4. Fetch lesson
+  // 3. Fetch lesson (must happen before the free-preview check — a lesson's
+  // free/paid status is now a per-lesson flag, not derivable from order alone)
   const { data: lessons, error: lessonErr } = await _supabase
     .from('lessons')
     .select('*')
@@ -185,6 +174,18 @@ async function sendLesson(phone) {
 
   const lesson = lessons[0]
 
+  // 4. Free preview check
+  const allowed = isLessonAllowed(enrollment, lesson)
+  if (!allowed) {
+    const courseUrl = `${_config.ACADEMYKIT_URL}/about-course/${slugify(course.host_name || 'creator')}/${slugify(course.name || course.slug || 'course')}/${course.id}`
+    await _sendMessage(
+      phone,
+      `🔒 *Free preview complete.*\n\nYou'll need to pay to continue this course.`,
+      { inline_keyboard: [[{ text: 'Pay Now', url: courseUrl }]] }
+    )
+    return
+  }
+
   // 5. Generate signed lesson page URL
   const lessonUrl = signLessonPageUrl(course.id, lesson.id, lesson.order_num, String(phone))
 
@@ -223,11 +224,10 @@ async function sendLesson(phone) {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-function isLessonAllowed(enrollment, lessonNum) {
+// KEEP IN SYNC WITH src/lib/freeLesson.ts in course-web
+function isLessonAllowed(enrollment, lesson) {
   if (enrollment.payment_status === 'paid') return true
-  const config = enrollment.courses?.free_preview_config || 'nothing free'
-  const maxFree = { 'lesson 1 free': 1, '2 lessons free': 2, '3 lessons free': 3, 'module 1 free': 3, '2 modules free': 6 }
-  return lessonNum <= (maxFree[config] || 0)
+  return enrollment.courses?.is_free_course === true || lesson.is_free === true
 }
 
 function slugify(text) {

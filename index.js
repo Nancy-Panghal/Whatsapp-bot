@@ -306,14 +306,7 @@ function slugify(text) {
     .trim();
 }
 
-function maxFreeLessons(config) {
-  if (config === "lesson 1 free") return 1;
-  if (config === "2 lessons free") return 2;
-  if (config === "3 lessons free") return 3;
-  if (config === "module 1 free") return 3;
-  if (config === "2 modules free") return 6;
-  return 0;
-}
+
 
 async function firstRow(query) {
   const { data, error } = await query.limit(1);
@@ -328,13 +321,7 @@ function courseUrl(course) {
   return `${ACADEMYKIT_URL}/course/${slugify(course.host_name || "creator")}/${slugify(course.name || course.slug || "course")}/${course.id}`;
 }
 
-function lessonAllowed(enrollment, lessonNumber) {
-  if (enrollment.payment_status === "paid") return true;
-  return (
-    lessonNumber <=
-    maxFreeLessons(enrollment.courses?.free_preview_config || "nothing free")
-  );
-}
+
 
 // A lesson has "activities" only when it carries something EXTRA beyond
 // its own primary content — e.g. a video/pdf/live lesson that also has a
@@ -820,7 +807,7 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
 
   const { data: lessons } = await supabase
     .from('lessons')
-    .select('id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required')
+    .select('id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required, is_free')
     .eq('course_id', enrollment.course_uuid)
     .eq('order_num', lessonOrderNum)
     .eq('is_published', true)
@@ -835,10 +822,8 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
   // Check access
   const isPaid = enrollment.payment_status === 'paid';
   if (!isPaid) {
-    const config = enrollment.courses?.free_preview_config || 'nothing free';
-    const maxFree = { 'lesson 1 free': 1, '2 lessons free': 2, '3 lessons free': 3, 'module 1 free': 3, '2 modules free': 6 };
-    const limit = maxFree[config] || 0;
-    if (lessonOrderNum > limit) {
+    const isFree = enrollment.courses?.is_free_course === true || lesson.is_free === true;
+    if (!isFree) {
       const course = enrollment.courses;
       const courseUrlStr = `${ACADEMYKIT_URL}/about-course/${slugify(course?.host_name || 'creator')}/${slugify(course?.name || 'course')}/${enrollment.course_uuid}`;
       await sendWhatsAppMessage(
