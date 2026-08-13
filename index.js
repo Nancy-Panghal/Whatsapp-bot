@@ -593,6 +593,25 @@ async function handleStart(phone, token) {
   const phoneOrEmail = normalizePhone(phone) || String(phone);
   console.log('[handleStart] step 4 — student id:', student?.id, '| isPaid:', isPaid, '| phoneOrEmail:', phoneOrEmail);
 
+  // 3b. No-leakage: a PAID enrollment may only use WhatsApp if the course's
+  // delivery method actually covers it. Free/preview tokens are unaffected —
+  // those are marketing previews, not the paid delivery channel.
+  if (isPaid) {
+    const courseDelivery = course.delivery || "both";
+    if (courseDelivery !== "whatsapp" && courseDelivery !== "both") {
+      console.warn('[handleStart] ❌ delivery method mismatch — course delivery is', courseDelivery, 'not whatsapp');
+      await sendWhatsAppMessage(
+        phone,
+        "⚠️ This course's lessons are not delivered via WhatsApp. Please use the delivery channel shown on your course page (Telegram or the web) to continue.",
+      );
+      await supabase
+        .from("whatsapp_tokens")
+        .update({ used: true, used_at: new Date().toISOString() })
+        .eq("id", tokenRow.id);
+      return;
+    }
+  }
+
   // 4. Find existing enrollment by every identifier before inserting
   let existingEnrollment = null;
 
