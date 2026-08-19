@@ -45,6 +45,8 @@ const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v22.0";
 const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET || "";
 const INTERNAL_BOT_SECRET = process.env.INTERNAL_BOT_SECRET || "";
 const META_LIVE_REMINDER_TEMPLATE = process.env.META_LIVE_REMINDER_TEMPLATE_NAME || "live_class_reminder";
+const META_RECORDING_READY_TEMPLATE = process.env.META_RECORDING_READY_TEMPLATE_NAME || "live_recording_ready";
+const META_RECORDING_UNAVAILABLE_TEMPLATE = process.env.META_RECORDING_UNAVAILABLE_TEMPLATE_NAME || "live_recording_unavailable";
 const META_TEMPLATE_LANG = process.env.META_TEMPLATE_LANG || "en";
 const ACADEMYKIT_URL = (process.env.ACADEMYKIT_URL || "").replace(/\/$/, "");
 const LESSON_LINK_SECRET =
@@ -257,21 +259,40 @@ async function sendCtaUrlButton(toPhone, bodyText, buttonText, targetUrl) {
 //   {{1}} lesson title   {{2}} course name   {{3}} time label   {{4}} join URL
 // Returns true/false so the caller (the /internal/send-reminder route) can
 // report failures back to the cron job instead of silently swallowing them.
-async function sendWhatsAppTemplate(toPhone, bodyParams) {
+//
+// bodyParams accepts two shapes:
+//   - plain strings, e.g. ['Intro to Guitar', 'in 30 minutes']
+//     → sent as POSITIONAL parameters (matches {{1}}, {{2}}... templates,
+//       e.g. live_class_reminder, approved before Meta required named
+//       parameters for newly-created templates)
+//   - {name, value} objects, e.g. [{name: 'session_title', value: '...'}]
+//     → sent as NAMED parameters (matches {{session_title}}... templates —
+//       required for any template created under Meta's current named-
+//       parameter rules; sending plain positional parameters against a
+//       named-format template gets silently rejected by Meta at send
+//       time even though the template itself was approved, so the shape
+//       here has to match how each specific template was actually built)
+async function sendWhatsAppTemplate(toPhone, templateName, bodyParams) {
   const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
   const to = String(toPhone).replace(/\D/g, "");
+
+  const parameters = bodyParams.map((p) =>
+    p && typeof p === "object" && "name" in p
+      ? { type: "text", text: String(p.value), parameter_name: p.name }
+      : { type: "text", text: String(p) }
+  );
 
   const payload = {
     messaging_product: "whatsapp",
     to,
     type: "template",
     template: {
-      name: META_LIVE_REMINDER_TEMPLATE,
+      name: templateName,
       language: { code: META_TEMPLATE_LANG },
       components: [
         {
           type: "body",
-          parameters: bodyParams.map((p) => ({ type: "text", text: String(p) })),
+          parameters,
         },
       ],
     },
@@ -285,11 +306,11 @@ async function sendWhatsAppTemplate(toPhone, bodyParams) {
       },
       timeout: 10000,
     });
-    console.log("[sendWhatsAppTemplate] ✅ sent to", to, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
+    console.log("[sendWhatsAppTemplate] ✅ sent to", to, "| template:", templateName, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
     return true;
   } catch (err) {
     const errData = err.response?.data;
-    console.error("[sendWhatsAppTemplate] ❌ FAILED to", to, "| template:", META_LIVE_REMINDER_TEMPLATE);
+    console.error("[sendWhatsAppTemplate] ❌ FAILED to", to, "| template:", templateName);
     console.error("[sendWhatsAppTemplate] Meta error:", JSON.stringify(errData?.error || err.message));
     return false;
   }
@@ -1068,7 +1089,42 @@ app.post("/internal/send-reminder", async (req, res) => {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  const ok = await sendWhatsAppTemplate(phone, [lessonTitle, courseName, timeLabel, joinUrl]);
+    const ok = await sendWhatsAppTemplate(phone, META_LIVE_REMINDER_TEMPLATE, [lessonTitle, courseName, timeLabel, joinUrl]);
+  if (!ok) {
+    return res.status(502).json({ error: "Meta rejected the template send — check template name/approval status" });
+  }
+  return res.status(200).json({ ok: true });
+});
+
+// Called by course-web's /api/cron/live-session-recording-notify (once
+// daily) — sends exactly one message per student per session: the
+// recording link if the creator uploaded one, or a "not available yet"
+// notice otherwise. Same internal-secret auth pattern as /internal/send-reminder above.
+app.post("/internal/send-live-recording", async (req, res) => {
+  const auth = req.get("Authorization") || "";
+  if (!INTERNAL_BOT_SECRET || auth !== `Bearer ${INTERNAL_BOT_SECRET}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { identity, sessionTitle, courseName, hasRecording, recordingLink } = req.body || {};
+  if (!identity || !sessionTitle || !courseName || typeof hasRecording !== "boolean") {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  if (hasRecording && !recordingLink) {
+    return res.status(400).json({ error: "recordingLink required when hasRecording is true" });
+  }
+
+  const ok = hasRecording
+    ? await sendWhatsAppTemplate(identity, META_RECORDING_READY_TEMPLATE, [
+        { name: "session_title", value: sessionTitle },
+        { name: "course_name", value: courseName },
+        { name: "recording_link", value: recordingLink },
+      ])
+    : await sendWhatsAppTemplate(identity, META_RECORDING_UNAVAILABLE_TEMPLATE, [
+        { name: "session_title", value: sessionTitle },
+        { name: "course_name", value: courseName },
+      ]);
+
   if (!ok) {
     return res.status(502).json({ error: "Meta rejected the template send — check template name/approval status" });
   }
@@ -1132,7 +1188,7 @@ async function pollLiveClassReminders() {
         const channel = s.students?.reminder_channel;
         if (channel !== "whatsapp" || !s.phone) continue;
 
-        const ok = await sendWhatsAppTemplate(s.phone, [lesson.title, courseName, "in 30 minutes", lesson.live_join_url]);
+                const ok = await sendWhatsAppTemplate(s.phone, META_LIVE_REMINDER_TEMPLATE, [lesson.title, courseName, "in 30 minutes", lesson.live_join_url]);
         console.log(`[pollLiveClassReminders] 30m reminder to ${s.phone} for lesson ${lesson.id}: ${ok ? "sent" : "FAILED"}`);
       }
 
