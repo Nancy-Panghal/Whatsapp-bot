@@ -61,11 +61,15 @@ const LESSON_LINK_SECRET =
 // payment webhook stores. This normalizer is kept anyway as a defensive
 // guard — some call sites still pass in identity strings built elsewhere
 // (signed lesson URLs, /start tokens) that may carry stray formatting.
-function normalizePhone(raw) {
-  if (!raw) return null;
-  const digits = String(raw).replace(/\D/g, "");
-  return digits || null;
-}
+// See phone.js — always normalize before reading OR writing the `phone`
+// column on enrollments/students/whatsapp_tokens. Meta's Cloud API sends
+// `message.from` WITH the country code (e.g. "919306385029"), but
+// course-web stores/matches bare 10-digit numbers with no country code
+// (see src/lib/phone.ts and EnrollModal.tsx's 10-digit input cap). This
+// mismatch was the root cause of "something went wrong saving your
+// enrollment" — the bot could never match a student's web-created
+// enrollment, so it fell into a fresh insert every time.
+const { normalizePhone } = require("./phone");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -684,7 +688,7 @@ async function handleStart(phone, token) {
     enrollError = error;
     enrollmentId = existingEnrollment.id;
   } else {
-    const { data: inserted, error } = await supabase
+        const { data: inserted, error } = await supabase
       .from("enrollments")
       .insert({
         phone: phoneOrEmail,
@@ -698,6 +702,12 @@ async function handleStart(phone, token) {
         quiz_results: [],
         amount_paid: 0,
         last_accessed: now,
+        // Match the fields other enrollment-creation paths (web checkout,
+        // creator test-enroll) already set, so an enrollment that happens
+        // to originate from WhatsApp (rather than being found and updated
+        // here) isn't left missing data those paths rely on.
+        delivery_method: course.delivery || "both",
+        certificate_student_name: tokenRow.student_name || null,
       })
       .select("id")
       .single();

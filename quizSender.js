@@ -22,11 +22,7 @@ function escMd(text) {
   return String(text || '').replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1')
 }
 
-function normalizePhone(raw) {
-  if (!raw) return null
-  const digits = String(raw).replace(/\D/g, '')
-  return digits || null
-}
+const { normalizePhone } = require('./phone')
 
 // Mirrors index.js's signResourceUrl / course-web's signLessonResourceUrl —
 // same secret, same payload shape, so /resource/[lessonId] can verify it.

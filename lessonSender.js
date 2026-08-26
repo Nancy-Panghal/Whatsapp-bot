@@ -24,14 +24,10 @@ function init({ supabase, sendMessage, config, buildLessonMenuKeyboard, sendCtaU
   _sendCtaUrlButton = sendCtaUrlButton
 }
 
-// Mirrors course-web/src/lib/phone.ts — digits only, no "+" or spaces.
-// Must normalize here too because `phone` arrives from Twilio as
-// "+919306385029" but the DB stores "919306385029".
-function normalizePhone(raw) {
-  if (!raw) return null
-  const digits = String(raw).replace(/\D/g, '')
-  return digits || null
-}
+// See phone.js — DB stores bare 10-digit numbers (no country code); Meta
+// sends `phone` with the country code prefixed, so it must be stripped
+// here before it's used to look anything up.
+const { normalizePhone } = require('./phone')
 
 // ── Signing (mirrors lib/signer.ts) ───────────────────────────────────────
 function signLessonPageUrl(courseId, lessonId, lessonNum, phone) {

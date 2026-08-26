@@ -4,6 +4,7 @@
  */
 
 const axios = require('axios')
+const { normalizePhone } = require('./phone')
 
 const MAX_BYTES = 5 * 1024 * 1024
 const ALLOWED_EXTENSIONS = new Set([
@@ -89,7 +90,7 @@ async function getEnrollment(phone) {
   const { data, error } = await _supabase
     .from('enrollments')
     .select('id, course_uuid, student_id, creator_id, current_lesson')
-    .eq('phone', String(phone))
+    .eq('phone', normalizePhone(phone) || String(phone))
     .order('enrolled_at', { ascending: false })
     .limit(1)
 
@@ -258,7 +259,7 @@ async function getPendingSubmission(phone) {
   const { data: enrollment } = await _supabase
     .from('enrollments')
     .select('id, student_id')
-    .eq('phone', String(phone))
+    .eq('phone', normalizePhone(phone) || String(phone))
     .order('enrolled_at', { ascending: false })
     .limit(1)
 
@@ -289,7 +290,7 @@ async function deletePendingSubmission(phone) {
   const { data: enrollment } = await _supabase
     .from('enrollments')
     .select('id, student_id')
-    .eq('phone', String(phone))
+    .eq('phone', normalizePhone(phone) || String(phone))
     .order('enrolled_at', { ascending: false })
     .limit(1)
 
