@@ -51,6 +51,33 @@ function signLessonPageUrl(courseId, lessonId, lessonNum, phone) {
   return `${_config.ACADEMYKIT_URL}/api/whatsapp/lesson?${params.toString()}`
 }
 
+async function createWebBootstrapUrl({ course, enrollment, channel }) {
+  const rawToken = crypto.randomBytes(32).toString('hex')
+  const tokenHash = crypto
+    .createHash('sha256')
+    .update(rawToken)
+    .digest('hex')
+
+  const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString()
+
+  const { error } = await _supabase
+    .from('web_bootstrap_tokens')
+    .insert({
+      token_hash: tokenHash,
+      course_id: course.id,
+      enrollment_id: enrollment.id,
+      student_id: enrollment.student_id || null,
+      channel,
+      expires_at: expiresAt,
+    })
+
+  if (error) {
+    throw new Error(`Could not create web access token: ${error.message}`)
+  }
+
+  return `${_config.ACADEMYKIT_URL}/api/web-access/bootstrap?t=${encodeURIComponent(rawToken)}`
+}
+
 // ── Zero-width fingerprint (mirrors lib/signer.ts) ─────────────────────────
 const ZWS = '\u200B'  // bit 0
 const ZWNJ = '\u200C' // bit 1
@@ -183,7 +210,11 @@ async function sendLesson(phone) {
   }
 
   // 5. Generate signed lesson page URL
-  const lessonUrl = signLessonPageUrl(course.id, lesson.id, lesson.order_num, String(phone))
+  const lessonUrl = await createWebBootstrapUrl({
+  course,
+  enrollment,
+  channel: 'whatsapp',
+})
 
   // 6. Build watermarked message
   const fp = encodeFingerprint(String(phone))
@@ -192,7 +223,7 @@ async function sendLesson(phone) {
   const linkBodyText = [
     `📖 *Lesson ${lesson.order_num}: ${escMd(lesson.title)}*`,
     durationLine,
-    `Your protected access expires in 2 hours.`,
+    'Open this link within 2 minutes. After opening it, you can continue learning on the website.',
     ``,
     `🔒 _This link is personal. Sharing it violates your license agreement._`,
     fp,
@@ -238,8 +269,7 @@ function slugify(text) {
 module.exports = {
   init,
   sendLesson,
-  // Exported so index.js can use them in sendSpecificLesson
-  signLessonPageUrl,
+  createWebBootstrapUrl,
   encodeFingerprint,
   escMd,
 }

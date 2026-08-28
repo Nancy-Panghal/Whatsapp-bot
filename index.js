@@ -20,6 +20,13 @@ const {
   hasPendingSubmission,
 } = require("./assignmentSender");
 
+const {
+  sendLesson,
+  createWebBootstrapUrl,
+  encodeFingerprint,
+  escMd,
+} = require('./lessonSender')
+
 const app = express();
 
 // DIAGNOSTIC — logs the bare fact that a request arrived, before any body
@@ -885,7 +892,11 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
     }
   }
 
-  const lessonUrl = signLessonPageUrl(enrollment.course_uuid, lesson.id, lesson.order_num, String(phone));
+  const lessonUrl = await createWebBootstrapUrl({
+  course: enrollment.courses,
+  enrollment,
+  channel: 'whatsapp',
+});
   const fp = encodeFingerprint(String(phone));
 
   const isWatchAgain = lesson.order_num < (enrollment.current_lesson || 1);
