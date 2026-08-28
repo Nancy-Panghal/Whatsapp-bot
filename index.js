@@ -23,6 +23,7 @@ const {
   createWebBootstrapUrl,
   encodeFingerprint,
   escMd,
+  init: initLessonSender,
 } = require('./lessonSender')
 
 const app = express();
