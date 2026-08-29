@@ -24,7 +24,7 @@ const {
   encodeFingerprint,
   escMd,
   init: initLessonSender,
-} = require('./lessonSender')
+} = require("./lessonSender");
 
 const app = express();
 
@@ -33,14 +33,20 @@ const app = express();
 // show up here, it never reached this server at all — the problem is
 // upstream (Meta not sending it, Render not routing it), not in this code.
 app.use((req, res, next) => {
-  console.log(`[REQUEST] ${req.method} ${req.originalUrl} | content-type: ${req.get("content-type") || "none"}`);
+  console.log(
+    `[REQUEST] ${req.method} ${req.originalUrl} | content-type: ${req.get("content-type") || "none"}`,
+  );
   next();
 });
 
-app.use(express.json({
-  limit: "2mb",
-  verify: (req, res, buf) => { req.rawBody = buf; },
-}));
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 const META_WHATSAPP_TOKEN = process.env.META_WHATSAPP_TOKEN;
@@ -50,9 +56,13 @@ const META_WEBHOOK_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN;
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v22.0";
 const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET || "";
 const INTERNAL_BOT_SECRET = process.env.INTERNAL_BOT_SECRET || "";
-const META_LIVE_REMINDER_TEMPLATE = process.env.META_LIVE_REMINDER_TEMPLATE_NAME || "live_class_reminder";
-const META_RECORDING_READY_TEMPLATE = process.env.META_RECORDING_READY_TEMPLATE_NAME || "live_recording_ready";
-const META_RECORDING_UNAVAILABLE_TEMPLATE = process.env.META_RECORDING_UNAVAILABLE_TEMPLATE_NAME || "live_recording_unavailable";
+const META_LIVE_REMINDER_TEMPLATE =
+  process.env.META_LIVE_REMINDER_TEMPLATE_NAME || "live_class_reminder";
+const META_RECORDING_READY_TEMPLATE =
+  process.env.META_RECORDING_READY_TEMPLATE_NAME || "live_recording_ready";
+const META_RECORDING_UNAVAILABLE_TEMPLATE =
+  process.env.META_RECORDING_UNAVAILABLE_TEMPLATE_NAME ||
+  "live_recording_unavailable";
 const META_TEMPLATE_LANG = process.env.META_TEMPLATE_LANG || "en";
 const ACADEMYKIT_URL = (process.env.ACADEMYKIT_URL || "").replace(/\/$/, "");
 const LESSON_LINK_SECRET =
@@ -86,8 +96,10 @@ const supabase = createClient(
 initWatermark(supabase);
 initLessonSender({
   supabase,
-  sendMessage: async (phone, text, keyboard, opts) => sendWhatsAppMessage(phone, text, keyboard, opts),
-  sendCtaUrlButton: async (phone, bodyText, buttonText, targetUrl) => sendCtaUrlButton(phone, bodyText, buttonText, targetUrl),
+  sendMessage: async (phone, text, keyboard, opts) =>
+    sendWhatsAppMessage(phone, text, keyboard, opts),
+  sendCtaUrlButton: async (phone, bodyText, buttonText, targetUrl) =>
+    sendCtaUrlButton(phone, bodyText, buttonText, targetUrl),
   buildLessonMenuKeyboard,
   config: {
     WHATSAPP_LINK_SECRET: LESSON_LINK_SECRET,
@@ -97,7 +109,8 @@ initLessonSender({
 });
 initQuizSender({
   supabase,
-  sendMessage: async (phone, text, keyboard, opts) => sendWhatsAppMessage(phone, text, keyboard, opts),
+  sendMessage: async (phone, text, keyboard, opts) =>
+    sendWhatsAppMessage(phone, text, keyboard, opts),
   config: {
     WHATSAPP_LINK_SECRET: LESSON_LINK_SECRET,
     LESSON_LINK_SECRET,
@@ -106,7 +119,8 @@ initQuizSender({
 });
 initAssignmentSender({
   supabase,
-  sendMessage: async (phone, text, keyboard, opts) => sendWhatsAppMessage(phone, text, keyboard, opts),
+  sendMessage: async (phone, text, keyboard, opts) =>
+    sendWhatsAppMessage(phone, text, keyboard, opts),
   config: {},
 });
 
@@ -138,7 +152,12 @@ function buildWhatsAppPayload(toPhone, text, keyboard, opts) {
   const listSectionTitle = opts?.listSectionTitle || "Options";
 
   if (!keyboard || !keyboard.inline_keyboard?.length) {
-    return { messaging_product: "whatsapp", to, type: "text", text: { body: text } };
+    return {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: text },
+    };
   }
 
   const flat = keyboard.inline_keyboard.flat();
@@ -146,10 +165,17 @@ function buildWhatsAppPayload(toPhone, text, keyboard, opts) {
   const callbackButtons = flat.filter((b) => b.callback_data);
 
   let bodyText = text;
-  urlButtons.forEach((b) => { bodyText += `\n\n${b.text}: ${b.url}`; });
+  urlButtons.forEach((b) => {
+    bodyText += `\n\n${b.text}: ${b.url}`;
+  });
 
   if (callbackButtons.length === 0) {
-    return { messaging_product: "whatsapp", to, type: "text", text: { body: bodyText } };
+    return {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: bodyText },
+    };
   }
 
   if (!forceList && callbackButtons.length <= 3) {
@@ -201,17 +227,27 @@ async function sendWhatsAppMessage(toPhone, text, keyboard, opts) {
     const resp = await axios.post(url, payload, {
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${META_WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${META_WHATSAPP_TOKEN}`,
       },
       timeout: 10000,
     });
-    console.log("[sendWhatsAppMessage] ✅ sent to", toPhone, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
+    console.log(
+      "[sendWhatsAppMessage] ✅ sent to",
+      toPhone,
+      "| status:",
+      resp.status,
+      "| id:",
+      resp.data?.messages?.[0]?.id,
+    );
   } catch (err) {
     // Log full Meta error but NEVER rethrow — a failed reply must not crash
     // the handler or roll back enrollment operations
     const errData = err.response?.data;
     console.error("[sendWhatsAppMessage] ❌ FAILED to", toPhone);
-    console.error("[sendWhatsAppMessage] Meta error:", JSON.stringify(errData?.error || err.message));
+    console.error(
+      "[sendWhatsAppMessage] Meta error:",
+      JSON.stringify(errData?.error || err.message),
+    );
   }
 }
 
@@ -246,15 +282,28 @@ async function sendCtaUrlButton(toPhone, bodyText, buttonText, targetUrl) {
 
   try {
     const resp = await axios.post(url, payload, {
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${META_WHATSAPP_TOKEN}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${META_WHATSAPP_TOKEN}`,
+      },
       timeout: 10000,
     });
-    console.log("[sendCtaUrlButton] ✅ sent to", to, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
+    console.log(
+      "[sendCtaUrlButton] ✅ sent to",
+      to,
+      "| status:",
+      resp.status,
+      "| id:",
+      resp.data?.messages?.[0]?.id,
+    );
     return true;
   } catch (err) {
     const errData = err.response?.data;
     console.error("[sendCtaUrlButton] ❌ FAILED to", to);
-    console.error("[sendCtaUrlButton] Meta error:", JSON.stringify(errData?.error || err.message));
+    console.error(
+      "[sendCtaUrlButton] Meta error:",
+      JSON.stringify(errData?.error || err.message),
+    );
     return false;
   }
 }
@@ -289,7 +338,7 @@ async function sendWhatsAppTemplate(toPhone, templateName, bodyParams) {
   const parameters = bodyParams.map((p) =>
     p && typeof p === "object" && "name" in p
       ? { type: "text", text: String(p.value), parameter_name: p.name }
-      : { type: "text", text: String(p) }
+      : { type: "text", text: String(p) },
   );
 
   const payload = {
@@ -312,21 +361,36 @@ async function sendWhatsAppTemplate(toPhone, templateName, bodyParams) {
     const resp = await axios.post(url, payload, {
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${META_WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${META_WHATSAPP_TOKEN}`,
       },
       timeout: 10000,
     });
-    console.log("[sendWhatsAppTemplate] ✅ sent to", to, "| template:", templateName, "| status:", resp.status, "| id:", resp.data?.messages?.[0]?.id);
+    console.log(
+      "[sendWhatsAppTemplate] ✅ sent to",
+      to,
+      "| template:",
+      templateName,
+      "| status:",
+      resp.status,
+      "| id:",
+      resp.data?.messages?.[0]?.id,
+    );
     return true;
   } catch (err) {
     const errData = err.response?.data;
-    console.error("[sendWhatsAppTemplate] ❌ FAILED to", to, "| template:", templateName);
-    console.error("[sendWhatsAppTemplate] Meta error:", JSON.stringify(errData?.error || err.message));
+    console.error(
+      "[sendWhatsAppTemplate] ❌ FAILED to",
+      to,
+      "| template:",
+      templateName,
+    );
+    console.error(
+      "[sendWhatsAppTemplate] Meta error:",
+      JSON.stringify(errData?.error || err.message),
+    );
     return false;
   }
 }
-
-
 
 function slugify(text) {
   return String(text || "")
@@ -336,8 +400,6 @@ function slugify(text) {
     .replace(/-+/g, "-")
     .trim();
 }
-
-
 
 async function firstRow(query) {
   const { data, error } = await query.limit(1);
@@ -351,8 +413,6 @@ async function firstRow(query) {
 function courseUrl(course) {
   return `${ACADEMYKIT_URL}/course/${slugify(course.host_name || "creator")}/${slugify(course.name || course.slug || "course")}/${course.id}`;
 }
-
-
 
 // A lesson has "activities" only when it carries something EXTRA beyond
 // its own primary content — e.g. a video/pdf/live lesson that also has a
@@ -368,8 +428,13 @@ function courseUrl(course) {
 function lessonHasActivities(lesson) {
   if (!lesson) return false;
   const hasNotes = Boolean(lesson.notes_url || lesson.summary_url);
-  const hasQuiz = lesson.content_type !== "quiz" && Array.isArray(lesson.quiz_questions) && lesson.quiz_questions.length > 0;
-  const hasAssignment = lesson.content_type !== "assignment" && Boolean(lesson.assignment_prompt || lesson.assignment_file_url);
+  const hasQuiz =
+    lesson.content_type !== "quiz" &&
+    Array.isArray(lesson.quiz_questions) &&
+    lesson.quiz_questions.length > 0;
+  const hasAssignment =
+    lesson.content_type !== "assignment" &&
+    Boolean(lesson.assignment_prompt || lesson.assignment_file_url);
   return hasNotes || hasQuiz || hasAssignment;
 }
 
@@ -392,15 +457,24 @@ async function buildLessonMenuKeyboard(supabase, enrollment, lesson) {
     .limit(1);
 
   if (nextLessons && nextLessons.length > 0) {
-    buttons.push({ text: "▶ Next Lesson", callback_data: `goto:${lesson.order_num + 1}` });
+    buttons.push({
+      text: "▶ Next Lesson",
+      callback_data: `goto:${lesson.order_num + 1}`,
+    });
   }
 
   if (lesson.order_num > 1) {
-    buttons.push({ text: "⬅ Previous Lesson", callback_data: `goto:${lesson.order_num - 1}` });
+    buttons.push({
+      text: "⬅ Previous Lesson",
+      callback_data: `goto:${lesson.order_num - 1}`,
+    });
   }
 
   if (lessonHasActivities(lesson)) {
-    buttons.push({ text: "🎯 Activities", callback_data: `activities:${lesson.order_num}` });
+    buttons.push({
+      text: "🎯 Activities",
+      callback_data: `activities:${lesson.order_num}`,
+    });
     return { inline_keyboard: buttons.map((b) => [b]) };
   }
 
@@ -420,14 +494,19 @@ async function sendActivitiesMenu(supabase, phone, enrollment, lessonOrderNum) {
   const lesson = await firstRow(
     supabase
       .from("lessons")
-      .select("id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
+      .select(
+        "id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required",
+      )
       .eq("course_id", enrollment.course_uuid)
       .eq("order_num", lessonOrderNum)
       .eq("is_published", true),
   );
 
   if (!lesson || !lessonHasActivities(lesson)) {
-    await sendWhatsAppMessage(phone, `ℹ️ No extra activities for *Lesson ${lessonOrderNum}* yet.`);
+    await sendWhatsAppMessage(
+      phone,
+      `ℹ️ No extra activities for *Lesson ${lessonOrderNum}* yet.`,
+    );
     return;
   }
 
@@ -435,18 +514,28 @@ async function sendActivitiesMenu(supabase, phone, enrollment, lessonOrderNum) {
   if (lesson.notes_url || lesson.summary_url) {
     rows.push({ text: "📝 Notes", callback_data: `notes:${lessonOrderNum}` });
   }
-  if (Array.isArray(lesson.quiz_questions) && lesson.quiz_questions.length > 0) {
+  if (
+    Array.isArray(lesson.quiz_questions) &&
+    lesson.quiz_questions.length > 0
+  ) {
     rows.push({ text: "🧠 Quiz", callback_data: `quiz:${lessonOrderNum}` });
   }
   if (lesson.assignment_prompt || lesson.assignment_file_url) {
-    rows.push({ text: "📋 Assignment", callback_data: `assign:${lessonOrderNum}` });
+    rows.push({
+      text: "📋 Assignment",
+      callback_data: `assign:${lessonOrderNum}`,
+    });
   }
 
   await sendWhatsAppMessage(
     phone,
     `🎯 Activities for Lesson ${lessonOrderNum}: ${lesson.title}\n\nChoose one:`,
     { inline_keyboard: rows.map((b) => [b]) },
-    { forceList: true, listButtonLabel: "Choose", listSectionTitle: "Activities" },
+    {
+      forceList: true,
+      listButtonLabel: "Choose",
+      listSectionTitle: "Activities",
+    },
   );
 }
 
@@ -461,13 +550,18 @@ async function sendNotesForLesson(supabase, phone, enrollment, lessonOrderNum) {
   );
 
   if (!lesson || (!lesson.summary_url && !lesson.notes_url)) {
-    await sendWhatsAppMessage(phone, `ℹ️ No notes for *Lesson ${lessonOrderNum}* yet.`);
+    await sendWhatsAppMessage(
+      phone,
+      `ℹ️ No notes for *Lesson ${lessonOrderNum}* yet.`,
+    );
     return;
   }
 
   const lines = [`📝 Notes — Lesson ${lessonOrderNum}: ${lesson.title}`, ""];
-  if (lesson.summary_url) lines.push(`• 📄 Summary: ${signResourceUrl(lesson.id, "summary", phone)}`);
-  if (lesson.notes_url) lines.push(`• 📝 Notes: ${signResourceUrl(lesson.id, "notes", phone)}`);
+  if (lesson.summary_url)
+    lines.push(`• 📄 Summary: ${signResourceUrl(lesson.id, "summary", phone)}`);
+  if (lesson.notes_url)
+    lines.push(`• 📝 Notes: ${signResourceUrl(lesson.id, "notes", phone)}`);
 
   await sendWhatsAppMessage(phone, lines.join("\n"));
 }
@@ -477,8 +571,15 @@ async function sendNotesForLesson(supabase, phone, enrollment, lessonOrderNum) {
 function signMyCoursesUrl(phone) {
   const exp = Date.now() + 2 * 60 * 60 * 1000;
   const payload = `mycourses.${phone}.${exp}`;
-  const sig = crypto.createHmac("sha256", LESSON_LINK_SECRET).update(payload).digest("hex");
-  const params = new URLSearchParams({ identity: String(phone), exp: String(exp), sig });
+  const sig = crypto
+    .createHmac("sha256", LESSON_LINK_SECRET)
+    .update(payload)
+    .digest("hex");
+  const params = new URLSearchParams({
+    identity: String(phone),
+    exp: String(exp),
+    sig,
+  });
   return `${ACADEMYKIT_URL}/wa/my-courses?${params.toString()}`;
 }
 
@@ -509,7 +610,12 @@ async function getEnrollment(phone) {
 }
 
 async function handleStart(phone, token) {
-  console.log('[handleStart] called | phone:', phone, '| token:', token ? token.slice(0, 16) + '...' : '(none)');
+  console.log(
+    "[handleStart] called | phone:",
+    phone,
+    "| token:",
+    token ? token.slice(0, 16) + "..." : "(none)",
+  );
 
   if (!token) {
     await sendWhatsAppMessage(
@@ -520,7 +626,7 @@ async function handleStart(phone, token) {
   }
 
   // 1. Find valid unused token
-  console.log('[handleStart] step 1 — looking up token in whatsapp_tokens');
+  console.log("[handleStart] step 1 — looking up token in whatsapp_tokens");
   const tokenRow = await firstRow(
     supabase
       .from("whatsapp_tokens")
@@ -531,29 +637,53 @@ async function handleStart(phone, token) {
   );
 
   if (!tokenRow) {
-    console.warn('[handleStart] ❌ token not found or already used or expired:', token.slice(0, 16));
+    console.warn(
+      "[handleStart] ❌ token not found or already used or expired:",
+      token.slice(0, 16),
+    );
     await sendWhatsAppMessage(
       phone,
       "⚠️ This WhatsApp link is invalid or has expired. Please open the course page and tap *Start on WhatsApp* again.",
     );
     return;
   }
-  console.log('[handleStart] ✅ token found | course_slug:', tokenRow.course_slug, '| creator_id:', tokenRow.creator_id, '| used:', tokenRow.used, '| expires_at:', tokenRow.expires_at);
+  console.log(
+    "[handleStart] ✅ token found | course_slug:",
+    tokenRow.course_slug,
+    "| creator_id:",
+    tokenRow.creator_id,
+    "| used:",
+    tokenRow.used,
+    "| expires_at:",
+    tokenRow.expires_at,
+  );
 
   const courseSlugOrId = tokenRow.course_slug;
 
   // 2. Verify course still exists
   let course;
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseSlugOrId)) {
-    const { data: courseRows } = await supabase.from("courses").select("*").eq("id", courseSlugOrId).limit(1);
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      courseSlugOrId,
+    )
+  ) {
+    const { data: courseRows } = await supabase
+      .from("courses")
+      .select("*")
+      .eq("id", courseSlugOrId)
+      .limit(1);
     course = courseRows?.[0];
   } else {
-    const { data: courseRows } = await supabase.from("courses").select("*").eq("slug", courseSlugOrId).limit(1);
+    const { data: courseRows } = await supabase
+      .from("courses")
+      .select("*")
+      .eq("slug", courseSlugOrId)
+      .limit(1);
     course = courseRows?.[0];
   }
 
   if (!course) {
-    console.warn('[handleStart] ❌ course not found for:', courseSlugOrId);
+    console.warn("[handleStart] ❌ course not found for:", courseSlugOrId);
     await sendWhatsAppMessage(phone, "⚠️ This course is no longer available.");
     await supabase
       .from("whatsapp_tokens")
@@ -561,24 +691,44 @@ async function handleStart(phone, token) {
       .eq("id", tokenRow.id);
     return;
   }
-  console.log('[handleStart] ✅ course found:', course.name, '| id:', course.id);
+  console.log(
+    "[handleStart] ✅ course found:",
+    course.name,
+    "| id:",
+    course.id,
+  );
 
   // 3. Upsert student record
   let student = null;
 
   if (tokenRow.student_id) {
-    const { data } = await supabase.from("students").select("id").eq("id", tokenRow.student_id).limit(1);
+    const { data } = await supabase
+      .from("students")
+      .select("id")
+      .eq("id", tokenRow.student_id)
+      .limit(1);
     student = data?.[0] || null;
   } else if (tokenRow.student_email) {
-    const { data } = await supabase.from("students").select("id").eq("email", tokenRow.student_email).limit(1);
+    const { data } = await supabase
+      .from("students")
+      .select("id")
+      .eq("email", tokenRow.student_email)
+      .limit(1);
     student = data?.[0] || null;
   } else if (tokenRow.student_phone) {
-    const { data } = await supabase.from("students").select("id").eq("phone", tokenRow.student_phone).limit(1);
+    const { data } = await supabase
+      .from("students")
+      .select("id")
+      .eq("phone", tokenRow.student_phone)
+      .limit(1);
     student = data?.[0] || null;
   }
 
   if (!student) {
-    console.log('[handleStart] step 3 — inserting new student | email:', tokenRow.student_email);
+    console.log(
+      "[handleStart] step 3 — inserting new student | email:",
+      tokenRow.student_email,
+    );
     const { data: inserted, error: insertErr } = await supabase
       .from("students")
       .insert({
@@ -593,23 +743,44 @@ async function handleStart(phone, token) {
       // Race with the website (razorpay/verify or webhook) inserting a
       // student with this same phone/email moments earlier. Use that row
       // instead of failing the whole /start flow over it.
-      console.warn("[handleStart] student insert raced — re-fetching existing row | phone:", tokenRow.student_phone, "| email:", tokenRow.student_email);
+      console.warn(
+        "[handleStart] student insert raced — re-fetching existing row | phone:",
+        tokenRow.student_phone,
+        "| email:",
+        tokenRow.student_email,
+      );
       let raced = null;
       if (tokenRow.student_phone) {
-        const { data } = await supabase.from("students").select("id").eq("phone", tokenRow.student_phone).limit(1);
+        const { data } = await supabase
+          .from("students")
+          .select("id")
+          .eq("phone", tokenRow.student_phone)
+          .limit(1);
         raced = data?.[0] || null;
       }
       if (!raced && tokenRow.student_email) {
-        const { data } = await supabase.from("students").select("id").eq("email", tokenRow.student_email).limit(1);
+        const { data } = await supabase
+          .from("students")
+          .select("id")
+          .eq("email", tokenRow.student_email)
+          .limit(1);
         raced = data?.[0] || null;
       }
       if (!raced) {
-        await sendWhatsAppMessage(phone, "⚠️ Something went wrong linking your account. Please try the link again.");
+        await sendWhatsAppMessage(
+          phone,
+          "⚠️ Something went wrong linking your account. Please try the link again.",
+        );
         return;
       }
       student = raced;
     } else if (insertErr) {
-      console.error("[handleStart] ❌ student insert error:", insertErr.message, '| code:', insertErr.code);
+      console.error(
+        "[handleStart] ❌ student insert error:",
+        insertErr.message,
+        "| code:",
+        insertErr.code,
+      );
       await sendWhatsAppMessage(
         phone,
         "⚠️ Something went wrong linking your account. Please try the link again.",
@@ -622,26 +793,14 @@ async function handleStart(phone, token) {
 
   const isPaid = Boolean(tokenRow.payment_id);
   const phoneOrEmail = normalizePhone(phone) || String(phone);
-  console.log('[handleStart] step 4 — student id:', student?.id, '| isPaid:', isPaid, '| phoneOrEmail:', phoneOrEmail);
-
-  // 3b. No-leakage: a PAID enrollment may only use WhatsApp if the course's
-  // delivery method actually covers it. Free/preview tokens are unaffected —
-  // those are marketing previews, not the paid delivery channel.
-  if (isPaid) {
-    const courseDelivery = course.delivery || "both";
-    if (courseDelivery !== "whatsapp" && courseDelivery !== "both") {
-      console.warn('[handleStart] ❌ delivery method mismatch — course delivery is', courseDelivery, 'not whatsapp');
-      await sendWhatsAppMessage(
-        phone,
-        "⚠️ This course's lessons are not delivered via WhatsApp. Please use the delivery channel shown on your course page (Telegram or the web) to continue.",
-      );
-      await supabase
-        .from("whatsapp_tokens")
-        .update({ used: true, used_at: new Date().toISOString() })
-        .eq("id", tokenRow.id);
-      return;
-    }
-  }
+  console.log(
+    "[handleStart] step 4 — student id:",
+    student?.id,
+    "| isPaid:",
+    isPaid,
+    "| phoneOrEmail:",
+    phoneOrEmail,
+  );
 
   // 4. Find existing enrollment by every identifier before inserting
   let existingEnrollment = null;
@@ -649,7 +808,9 @@ async function handleStart(phone, token) {
   if (student?.id) {
     const { data } = await supabase
       .from("enrollments")
-      .select("id, payment_status, completed_lessons, current_lesson, quiz_results")
+      .select(
+        "id, student_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
+      )
       .eq("course_uuid", course.id)
       .eq("student_id", student.id)
       .limit(1);
@@ -659,12 +820,49 @@ async function handleStart(phone, token) {
   if (!existingEnrollment && phoneOrEmail) {
     const { data } = await supabase
       .from("enrollments")
-      .select("id, payment_status, completed_lessons, current_lesson, quiz_results")
+      .select(
+        "id, student_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
+      )
       .eq("course_uuid", course.id)
       .eq("phone", phoneOrEmail)
       .limit(1);
-    existingEnrollment = data?.[0] || null;
+    existingEnrollment = data?.[0] || null;  
   }
+
+  // IMPORTANT:
+// Existing students use enrollment.delivery_method.
+// course.delivery is only the default for new enrollments.
+const effectiveDeliveryMethod =
+  existingEnrollment?.delivery_method ||
+  course.delivery ||
+  "both";
+
+if (
+  isPaid &&
+  effectiveDeliveryMethod !== "whatsapp" &&
+  effectiveDeliveryMethod !== "both"
+) {
+  console.warn(
+    "[handleStart] WhatsApp blocked by enrollment snapshot:",
+    effectiveDeliveryMethod
+  );
+
+  await sendWhatsAppMessage(
+    phone,
+    "⚠️ This course's lessons are not delivered via WhatsApp. Please use the delivery channel shown on your course page (Telegram or the web) to continue."
+  );
+
+  await supabase
+    .from("whatsapp_tokens")
+    .update({
+      used: true,
+      used_at: new Date().toISOString(),
+    })
+    .eq("id", tokenRow.id);
+
+  return;
+}
+
 
   const now = new Date().toISOString();
 
@@ -686,15 +884,19 @@ async function handleStart(phone, token) {
         student_id: student?.id || existingEnrollment.student_id || null,
         phone: phoneOrEmail,
         payment_status: newPaymentStatus,
-        payment_id: tokenRow.payment_id || existingEnrollment.payment_id || null,
+        payment_id:
+          tokenRow.payment_id || existingEnrollment.payment_id || null,
+        delivery_method:
+          existingEnrollment.delivery_method || course.delivery || "both",
         last_accessed: now,
+        
       })
       .eq("id", existingEnrollment.id);
 
     enrollError = error;
     enrollmentId = existingEnrollment.id;
   } else {
-        const { data: inserted, error } = await supabase
+    const { data: inserted, error } = await supabase
       .from("enrollments")
       .insert({
         phone: phoneOrEmail,
@@ -724,22 +926,34 @@ async function handleStart(phone, token) {
 
   // 6. Only mark token used AFTER enrollment is confirmed
   if (enrollError || !enrollmentId) {
-    console.error("[handleStart] ❌ enrollment upsert FAILED | error:", enrollError?.message, '| code:', enrollError?.code, '| details:', enrollError?.details);
-    console.error("[handleStart] ❌ was this an existing enrollment update?", Boolean(existingEnrollment), '| enrollmentId:', enrollmentId);
+    console.error(
+      "[handleStart] ❌ enrollment upsert FAILED | error:",
+      enrollError?.message,
+      "| code:",
+      enrollError?.code,
+      "| details:",
+      enrollError?.details,
+    );
+    console.error(
+      "[handleStart] ❌ was this an existing enrollment update?",
+      Boolean(existingEnrollment),
+      "| enrollmentId:",
+      enrollmentId,
+    );
     await sendWhatsAppMessage(
       phone,
       "⚠️ Something went wrong saving your enrollment. Please tap the link again — your access token is still valid.",
     );
     return;
   }
-  console.log('[handleStart] ✅ enrollment upserted | id:', enrollmentId);
+  console.log("[handleStart] ✅ enrollment upserted | id:", enrollmentId);
 
   await supabase
     .from("whatsapp_tokens")
     .update({ used: true, used_at: now, student_id: student?.id })
     .eq("id", tokenRow.id);
 
-  console.log('[handleStart] ✅ all done — sending success message to', phone);
+  console.log("[handleStart] ✅ all done — sending success message to", phone);
   await sendWhatsAppMessage(
     phone,
     "✅ You're connected! Tap below to start learning.",
@@ -750,13 +964,16 @@ async function handleStart(phone, token) {
       ],
     },
   );
-  console.log('[handleStart] ✅ success message dispatched');
+  console.log("[handleStart] ✅ success message dispatched");
 }
 
 async function markDone(phone, lessonNumber) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment || !enrollment.courses) {
-    await sendWhatsAppMessage(phone, "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.");
+    await sendWhatsAppMessage(
+      phone,
+      "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+    );
     return;
   }
 
@@ -786,7 +1003,9 @@ async function markDone(phone, lessonNumber) {
   const lesson = await firstRow(
     supabase
       .from("lessons")
-      .select("id, order_num, content_type, summary_url, notes_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required")
+      .select(
+        "id, order_num, content_type, summary_url, notes_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required",
+      )
       .eq("course_id", enrollment.course_uuid)
       .eq("order_num", lessonNumber)
       .eq("is_published", true),
@@ -806,7 +1025,11 @@ async function markDone(phone, lessonNumber) {
   const message = `✅ Lesson ${lessonNumber} marked complete!`;
 
   if (lesson) {
-    const keyboard = await buildLessonMenuKeyboard(supabase, enrollment, lesson);
+    const keyboard = await buildLessonMenuKeyboard(
+      supabase,
+      enrollment,
+      lesson,
+    );
     if (assignmentBlocksNext) {
       // Required assignment not yet submitted — drop the Next Lesson row so
       // the student isn't misled into thinking they can skip ahead; the
@@ -826,76 +1049,101 @@ async function markDone(phone, lessonNumber) {
 async function sendProgress(phone) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment || !enrollment.courses) {
-    await sendWhatsAppMessage(phone, "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.");
+    await sendWhatsAppMessage(
+      phone,
+      "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+    );
     return;
   }
 
   const completed = (enrollment.completed_lessons || []).length;
   const total = enrollment.courses.total_lessons || 0;
-  const percent = total > 0 ? Math.min(Math.round((completed / total) * 100), 100) : 0;
+  const percent =
+    total > 0 ? Math.min(Math.round((completed / total) * 100), 100) : 0;
 
   await sendWhatsAppMessage(
     phone,
     `📊 *Progress:* ${completed}/${total} lessons complete (${percent}%)\nCurrent lesson: *${enrollment.current_lesson || 1}*`,
-    { inline_keyboard: [[{ text: '▶ Continue', callback_data: 'lesson' }]] },
+    { inline_keyboard: [[{ text: "▶ Continue", callback_data: "lesson" }]] },
   );
 }
 
 async function sendSpecificLesson(phone, lessonOrderNum) {
   const enrollment = await getEnrollment(phone);
   if (!enrollment) {
-    await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.');
+    await sendWhatsAppMessage(
+      phone,
+      "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+    );
     return;
   }
 
   const currentLesson = enrollment.current_lesson || 1;
   if (lessonOrderNum > currentLesson) {
-    const assignmentBlock = await getRequiredAssignmentBlock(enrollment, lessonOrderNum);
+    const assignmentBlock = await getRequiredAssignmentBlock(
+      enrollment,
+      lessonOrderNum,
+    );
     if (assignmentBlock) {
       await sendWhatsAppMessage(
         phone,
         `🔒 Assignment required\n\nComplete the assignment for Lesson ${assignmentBlock.prevLessonNum} before continuing.`,
-        { inline_keyboard: [[{ text: '📝 Submit HW', callback_data: `assign:${assignmentBlock.prevLessonNum}` }]] },
+        {
+          inline_keyboard: [
+            [
+              {
+                text: "📝 Submit HW",
+                callback_data: `assign:${assignmentBlock.prevLessonNum}`,
+              },
+            ],
+          ],
+        },
       );
       return;
     }
   }
 
   const { data: lessons } = await supabase
-    .from('lessons')
-    .select('id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required, is_free')
-    .eq('course_id', enrollment.course_uuid)
-    .eq('order_num', lessonOrderNum)
-    .eq('is_published', true)
+    .from("lessons")
+    .select(
+      "id, title, order_num, content_type, notes_url, summary_url, quiz_questions, assignment_prompt, assignment_file_url, assignment_required, is_free",
+    )
+    .eq("course_id", enrollment.course_uuid)
+    .eq("order_num", lessonOrderNum)
+    .eq("is_published", true)
     .limit(1);
 
   const lesson = lessons?.[0];
   if (!lesson) {
-    await sendWhatsAppMessage(phone, `⚠️ Lesson ${lessonOrderNum} is not available yet.`);
+    await sendWhatsAppMessage(
+      phone,
+      `⚠️ Lesson ${lessonOrderNum} is not available yet.`,
+    );
     return;
   }
 
   // Check access
-  const isPaid = enrollment.payment_status === 'paid';
+  const isPaid = enrollment.payment_status === "paid";
   if (!isPaid) {
-    const isFree = enrollment.courses?.is_free_course === true || lesson.is_free === true;
+    const isFree =
+      enrollment.courses?.is_free_course === true || lesson.is_free === true;
     if (!isFree) {
       const course = enrollment.courses;
-      const courseUrlStr = `${ACADEMYKIT_URL}/about-course/${slugify(course?.host_name || 'creator')}/${slugify(course?.name || 'course')}/${enrollment.course_uuid}`;
+      const courseUrlStr = `${ACADEMYKIT_URL}/about-course/${slugify(course?.host_name || "creator")}/${slugify(course?.name || "course")}/${enrollment.course_uuid}`;
       await sendWhatsAppMessage(
         phone,
         `🔒 This lesson is locked.\n\nYou've completed your free preview — pay to unlock the full course and keep going.`,
-        { inline_keyboard: [[{ text: 'Pay Now', url: courseUrlStr }]] },
+        { inline_keyboard: [[{ text: "Pay Now", url: courseUrlStr }]] },
       );
       return;
     }
   }
 
   const lessonUrl = await createWebBootstrapUrl({
-  course: enrollment.courses,
-  enrollment,
-  channel: 'whatsapp',
-});
+    course: enrollment.courses,
+    enrollment,
+    channel: "whatsapp",
+  });
   const fp = encodeFingerprint(String(phone));
 
   const isWatchAgain = lesson.order_num < (enrollment.current_lesson || 1);
@@ -905,100 +1153,137 @@ async function sendSpecificLesson(phone, lessonOrderNum) {
 
   const linkBodyText = `${headerText}\n\nAccess expires in 2 hours.\n\n🔒 This link is personal. Do not share it.\n${fp}`;
 
-  await sendCtaUrlButton(phone, linkBodyText, '▶ Open Lesson', lessonUrl);
+  await sendCtaUrlButton(phone, linkBodyText, "▶ Open Lesson", lessonUrl);
 
   const keyboard = await buildLessonMenuKeyboard(supabase, enrollment, lesson);
   await sendWhatsAppMessage(phone, `What's next?`, keyboard);
 
   await supabase
-    .from('enrollments')
+    .from("enrollments")
     .update({ last_accessed: new Date().toISOString() })
-    .eq('id', enrollment.id)
-    .then(() => {}).catch(() => {});
+    .eq("id", enrollment.id)
+    .then(() => {})
+    .catch(() => {});
 }
 
 async function handleIncomingMessage(metaMessage) {
   try {
     const phone = metaMessage.from; // Meta sends digits only, e.g. "919306385029"
-    let text = '';
-    if (metaMessage.type === 'text') {
-      text = (metaMessage.text?.body || '').trim();
-    } else if (metaMessage.type === 'interactive') {
+    let text = "";
+    if (metaMessage.type === "text") {
+      text = (metaMessage.text?.body || "").trim();
+    } else if (metaMessage.type === "interactive") {
       const interactive = metaMessage.interactive;
-      if (interactive?.type === 'button_reply') {
+      if (interactive?.type === "button_reply") {
         text = interactive.button_reply.id;
-      } else if (interactive?.type === 'list_reply') {
+      } else if (interactive?.type === "list_reply") {
         text = interactive.list_reply.id;
       }
     }
 
-    console.log('[handleIncomingMessage] received message from:', phone, 'text:', text);
+    console.log(
+      "[handleIncomingMessage] received message from:",
+      phone,
+      "text:",
+      text,
+    );
 
     const hasPending = await hasPendingSubmission(phone);
     if (hasPending) {
-      if (text && !text.startsWith('/')) {
+      if (text && !text.startsWith("/")) {
         return submitAssignmentText(phone, text);
       }
     }
 
-    if (text.startsWith('/start')) {
-      const parts = text.split(' ');
-      const token = parts[1] || '';
-      if (token.startsWith('done_')) {
-        const lessonNumber = Number(token.replace('done_', ''));
+    if (text.startsWith("/start")) {
+      const parts = text.split(" ");
+      const token = parts[1] || "";
+      if (token.startsWith("done_")) {
+        const lessonNumber = Number(token.replace("done_", ""));
         return markDone(phone, lessonNumber);
       }
       return handleStart(phone, token);
     }
-    if (text === '/lesson' || text.toLowerCase() === 'lesson' || text.toLowerCase() === 'next lesson') {
+    if (
+      text === "/lesson" ||
+      text.toLowerCase() === "lesson" ||
+      text.toLowerCase() === "next lesson"
+    ) {
       return sendLesson(phone);
     }
-    if (text === '/progress' || text.toLowerCase() === 'progress') {
+    if (text === "/progress" || text.toLowerCase() === "progress") {
       return sendProgress(phone);
     }
-    if (text === '/cancel' || text.toLowerCase() === 'cancel') {
+    if (text === "/cancel" || text.toLowerCase() === "cancel") {
       if (hasPending) {
         await cancelPending(phone);
       } else {
-        await sendWhatsAppMessage(phone, 'ℹ️ Nothing to cancel.');
+        await sendWhatsAppMessage(phone, "ℹ️ Nothing to cancel.");
       }
       return;
     }
-    if (text.startsWith('done:')) {
-      const lessonNumber = Number(text.replace('done:', ''));
+    if (text.startsWith("done:")) {
+      const lessonNumber = Number(text.replace("done:", ""));
       return markDone(phone, lessonNumber);
     }
-    if (text.startsWith('quiz:')) {
-      const lessonNumber = Number(text.replace('quiz:', ''));
+    if (text.startsWith("quiz:")) {
+      const lessonNumber = Number(text.replace("quiz:", ""));
       return sendQuiz(phone, lessonNumber);
     }
-    if (text.startsWith('assign:')) {
-      const lessonNumber = Number(text.replace('assign:', ''));
+    if (text.startsWith("assign:")) {
+      const lessonNumber = Number(text.replace("assign:", ""));
       return beginAssignmentSubmit(phone, lessonNumber);
     }
-    if (text.startsWith('goto:')) {
-      const targetNum = Number(text.replace('goto:', ''));
+    if (text.startsWith("goto:")) {
+      const targetNum = Number(text.replace("goto:", ""));
       return sendSpecificLesson(phone, targetNum);
     }
-    if (text.startsWith('activities:')) {
-      const lessonNumber = Number(text.replace('activities:', ''));
+    if (text.startsWith("activities:")) {
+      const lessonNumber = Number(text.replace("activities:", ""));
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
+      if (!enrollment) {
+        await sendWhatsAppMessage(
+          phone,
+          "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+        );
+        return;
+      }
       return sendActivitiesMenu(supabase, phone, enrollment, lessonNumber);
     }
-    if (text.startsWith('notes:')) {
-      const lessonNumber = Number(text.replace('notes:', ''));
+    if (text.startsWith("notes:")) {
+      const lessonNumber = Number(text.replace("notes:", ""));
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
+      if (!enrollment) {
+        await sendWhatsAppMessage(
+          phone,
+          "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+        );
+        return;
+      }
       return sendNotesForLesson(supabase, phone, enrollment, lessonNumber);
     }
-    if (text === 'mycourses' || text.toLowerCase() === 'my courses') {
+    if (text === "mycourses" || text.toLowerCase() === "my courses") {
       const enrollment = await getEnrollment(phone);
-      if (!enrollment) { await sendWhatsAppMessage(phone, 'ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.'); return; }
+      if (!enrollment) {
+        await sendWhatsAppMessage(
+          phone,
+          "ℹ️ No course connected yet. Open a course page and tap *Start on WhatsApp* to begin.",
+        );
+        return;
+      }
       await sendWhatsAppMessage(
         phone,
-        '📚 *My Courses*\n\nTap below to see all your enrolled courses and progress.',
-        { inline_keyboard: [[{ text: '📚 Open My Courses', url: signMyCoursesUrl(String(enrollment.phone)) }]] },
+        "📚 *My Courses*\n\nTap below to see all your enrolled courses and progress.",
+        {
+          inline_keyboard: [
+            [
+              {
+                text: "📚 Open My Courses",
+                url: signMyCoursesUrl(String(enrollment.phone)),
+              },
+            ],
+          ],
+        },
       );
       return;
     }
@@ -1006,10 +1291,14 @@ async function handleIncomingMessage(metaMessage) {
     // Default response
     return sendWhatsAppMessage(
       phone,
-      '👋 *Welcome to Kurso!*\n\nHere\'s what you can do:\n\n📖 send *lesson* — get your next lesson\n📊 send *progress* — check your progress\n📚 send *my courses* — see all your enrolled courses\n✋ send */cancel* — cancel a pending task',
+      "👋 *Welcome to Kurso!*\n\nHere's what you can do:\n\n📖 send *lesson* — get your next lesson\n📊 send *progress* — check your progress\n📚 send *my courses* — see all your enrolled courses\n✋ send */cancel* — cancel a pending task",
     );
   } catch (err) {
-    console.error('[handleIncomingMessage] unhandled error:', err.message, err.stack);
+    console.error(
+      "[handleIncomingMessage] unhandled error:",
+      err.message,
+      err.stack,
+    );
   }
 }
 
@@ -1019,11 +1308,16 @@ async function handleIncomingMessage(metaMessage) {
 // parsed body, since re-serializing can change key order/whitespace and
 // silently break the signature check.
 function validateMetaSignature(req, appSecret) {
-  const signatureHeader = req.get('X-Hub-Signature-256');
+  const signatureHeader = req.get("X-Hub-Signature-256");
   if (!signatureHeader || !req.rawBody) return false;
-  const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(req.rawBody).digest('hex');
+  const expected =
+    "sha256=" +
+    crypto.createHmac("sha256", appSecret).update(req.rawBody).digest("hex");
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+    return crypto.timingSafeEqual(
+      Buffer.from(expected),
+      Buffer.from(signatureHeader),
+    );
   } catch {
     return false; // length mismatch → definitely invalid, not a crash
   }
@@ -1031,64 +1325,98 @@ function validateMetaSignature(req, appSecret) {
 
 // One-time (and periodic) verification handshake Meta sends as a GET
 // request when you configure the webhook URL in Meta App Dashboard.
-app.get('/webhook/whatsapp', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === META_WEBHOOK_VERIFY_TOKEN) {
-    console.log('[webhook/whatsapp] ✅ verify handshake OK');
+app.get("/webhook/whatsapp", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === META_WEBHOOK_VERIFY_TOKEN) {
+    console.log("[webhook/whatsapp] ✅ verify handshake OK");
     return res.status(200).send(challenge);
   }
-  console.error('[webhook/whatsapp] ❌ verify handshake failed');
+  console.error("[webhook/whatsapp] ❌ verify handshake failed");
   return res.sendStatus(403);
 });
 
 // Webhook endpoint for Meta — must match what's configured in
 // Meta App Dashboard > WhatsApp > Configuration > Webhook URL.
 app.post("/webhook/whatsapp", async (req, res) => {
-  console.log("[webhook/whatsapp] POST received | rawBody present:", Boolean(req.rawBody), "| rawBody length:", req.rawBody?.length || 0);
+  console.log(
+    "[webhook/whatsapp] POST received | rawBody present:",
+    Boolean(req.rawBody),
+    "| rawBody length:",
+    req.rawBody?.length || 0,
+  );
   try {
     if (META_APP_SECRET) {
       const isValid = validateMetaSignature(req, META_APP_SECRET);
-      console.log("[webhook/whatsapp] signature check:", isValid ? "✅ valid" : "❌ INVALID");
+      console.log(
+        "[webhook/whatsapp] signature check:",
+        isValid ? "✅ valid" : "❌ INVALID",
+      );
       if (!isValid) {
-        console.error('[webhook/whatsapp] ❌ Invalid Meta signature — X-Hub-Signature-256 header present:', Boolean(req.get('X-Hub-Signature-256')));
-        return res.status(403).send('Forbidden');
+        console.error(
+          "[webhook/whatsapp] ❌ Invalid Meta signature — X-Hub-Signature-256 header present:",
+          Boolean(req.get("X-Hub-Signature-256")),
+        );
+        return res.status(403).send("Forbidden");
       }
     } else {
-      console.warn("[webhook/whatsapp] ⚠️ META_APP_SECRET not set — skipping signature check entirely");
+      console.warn(
+        "[webhook/whatsapp] ⚠️ META_APP_SECRET not set — skipping signature check entirely",
+      );
     }
 
     res.sendStatus(200); // ack immediately — Meta retries hard on non-200/timeout
 
-    console.log("[webhook/whatsapp] payload:", JSON.stringify(req.body).slice(0, 2000));
+    console.log(
+      "[webhook/whatsapp] payload:",
+      JSON.stringify(req.body).slice(0, 2000),
+    );
 
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) {
-      console.log("[webhook/whatsapp] no message in payload — likely a status callback (sent/delivered/read), or a Meta test payload with a different shape");
+      console.log(
+        "[webhook/whatsapp] no message in payload — likely a status callback (sent/delivered/read), or a Meta test payload with a different shape",
+      );
       return;
     }
-    console.log("[webhook/whatsapp] message extracted, id:", message.id, "| type:", message.type, "| from:", message.from);
+    console.log(
+      "[webhook/whatsapp] message extracted, id:",
+      message.id,
+      "| type:",
+      message.type,
+      "| from:",
+      message.from,
+    );
 
     // Idempotency check — WAMID plays the same role Twilio's MessageSid did
     const messageId = message.id;
     if (messageId) {
       const { data: existing } = await supabase
-        .from('webhook_processed_messages')
-        .select('message_sid')
-        .eq('message_sid', messageId)
+        .from("webhook_processed_messages")
+        .select("message_sid")
+        .eq("message_sid", messageId)
         .maybeSingle();
 
       if (existing) {
-        console.log('[webhook/whatsapp] ℹ️ Already processed message ID:', messageId);
+        console.log(
+          "[webhook/whatsapp] ℹ️ Already processed message ID:",
+          messageId,
+        );
         return;
       }
-      await supabase.from('webhook_processed_messages').insert({ message_sid: messageId });
+      await supabase
+        .from("webhook_processed_messages")
+        .insert({ message_sid: messageId });
     }
 
     await handleIncomingMessage(message);
   } catch (err) {
-    console.error("[webhook/whatsapp] ❌ unhandled error:", err.message, err.stack);
+    console.error(
+      "[webhook/whatsapp] ❌ unhandled error:",
+      err.message,
+      err.stack,
+    );
   }
 });
 
@@ -1109,9 +1437,19 @@ app.post("/internal/send-reminder", async (req, res) => {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-    const ok = await sendWhatsAppTemplate(phone, META_LIVE_REMINDER_TEMPLATE, [lessonTitle, courseName, timeLabel, joinUrl]);
+  const ok = await sendWhatsAppTemplate(phone, META_LIVE_REMINDER_TEMPLATE, [
+    lessonTitle,
+    courseName,
+    timeLabel,
+    joinUrl,
+  ]);
   if (!ok) {
-    return res.status(502).json({ error: "Meta rejected the template send — check template name/approval status" });
+    return res
+      .status(502)
+      .json({
+        error:
+          "Meta rejected the template send — check template name/approval status",
+      });
   }
   return res.status(200).json({ ok: true });
 });
@@ -1126,12 +1464,20 @@ app.post("/internal/send-live-recording", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { identity, sessionTitle, courseName, hasRecording, recordingLink } = req.body || {};
-  if (!identity || !sessionTitle || !courseName || typeof hasRecording !== "boolean") {
+  const { identity, sessionTitle, courseName, hasRecording, recordingLink } =
+    req.body || {};
+  if (
+    !identity ||
+    !sessionTitle ||
+    !courseName ||
+    typeof hasRecording !== "boolean"
+  ) {
     return res.status(400).json({ error: "Missing required fields" });
   }
   if (hasRecording && !recordingLink) {
-    return res.status(400).json({ error: "recordingLink required when hasRecording is true" });
+    return res
+      .status(400)
+      .json({ error: "recordingLink required when hasRecording is true" });
   }
 
   const ok = hasRecording
@@ -1140,13 +1486,22 @@ app.post("/internal/send-live-recording", async (req, res) => {
         { name: "course_name", value: courseName },
         { name: "recording_link", value: recordingLink },
       ])
-    : await sendWhatsAppTemplate(identity, META_RECORDING_UNAVAILABLE_TEMPLATE, [
-        { name: "session_title", value: sessionTitle },
-        { name: "course_name", value: courseName },
-      ]);
+    : await sendWhatsAppTemplate(
+        identity,
+        META_RECORDING_UNAVAILABLE_TEMPLATE,
+        [
+          { name: "session_title", value: sessionTitle },
+          { name: "course_name", value: courseName },
+        ],
+      );
 
   if (!ok) {
-    return res.status(502).json({ error: "Meta rejected the template send — check template name/approval status" });
+    return res
+      .status(502)
+      .json({
+        error:
+          "Meta rejected the template send — check template name/approval status",
+      });
   }
   return res.status(200).json({ ok: true });
 });
@@ -1175,7 +1530,9 @@ async function pollLiveClassReminders() {
 
     const { data: dueLessons, error: lessonsError } = await supabase
       .from("lessons")
-      .select("id, title, course_id, order_num, live_join_url, live_scheduled_at, courses:course_id(name)")
+      .select(
+        "id, title, course_id, order_num, live_join_url, live_scheduled_at, courses:course_id(name)",
+      )
       .eq("content_type", "live")
       .eq("is_published", true)
       .is("reminder_30m_sent_at", null)
@@ -1184,7 +1541,10 @@ async function pollLiveClassReminders() {
       .lte("live_scheduled_at", windowEnd);
 
     if (lessonsError) {
-      console.error("[pollLiveClassReminders] lesson query failed:", lessonsError.message);
+      console.error(
+        "[pollLiveClassReminders] lesson query failed:",
+        lessonsError.message,
+      );
       return;
     }
     if (!dueLessons || dueLessons.length === 0) return;
@@ -1198,7 +1558,11 @@ async function pollLiveClassReminders() {
         .eq("payment_status", "paid");
 
       if (studentsError) {
-        console.error("[pollLiveClassReminders] enrollment query failed for lesson", lesson.id, studentsError.message);
+        console.error(
+          "[pollLiveClassReminders] enrollment query failed for lesson",
+          lesson.id,
+          studentsError.message,
+        );
         continue;
       }
 
@@ -1208,11 +1572,20 @@ async function pollLiveClassReminders() {
         const channel = s.students?.reminder_channel;
         if (channel !== "whatsapp" || !s.phone) continue;
 
-                const ok = await sendWhatsAppTemplate(s.phone, META_LIVE_REMINDER_TEMPLATE, [lesson.title, courseName, "in 30 minutes", lesson.live_join_url]);
-        console.log(`[pollLiveClassReminders] 30m reminder to ${s.phone} for lesson ${lesson.id}: ${ok ? "sent" : "FAILED"}`);
+        const ok = await sendWhatsAppTemplate(
+          s.phone,
+          META_LIVE_REMINDER_TEMPLATE,
+          [lesson.title, courseName, "in 30 minutes", lesson.live_join_url],
+        );
+        console.log(
+          `[pollLiveClassReminders] 30m reminder to ${s.phone} for lesson ${lesson.id}: ${ok ? "sent" : "FAILED"}`,
+        );
       }
 
-      await supabase.from("lessons").update({ reminder_30m_sent_at: new Date().toISOString() }).eq("id", lesson.id);
+      await supabase
+        .from("lessons")
+        .update({ reminder_30m_sent_at: new Date().toISOString() })
+        .eq("id", lesson.id);
     }
   } catch (err) {
     console.error("[pollLiveClassReminders] unhandled error:", err.message);
@@ -1239,8 +1612,13 @@ app.use((req, res) => {
 // so it shows up in logs instead of Express silently sending its default
 // error page.
 app.use((err, req, res, next) => {
-  console.error(`[UNHANDLED ERROR] ${req.method} ${req.originalUrl}:`, err.message, err.stack);
-  if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+  console.error(
+    `[UNHANDLED ERROR] ${req.method} ${req.originalUrl}:`,
+    err.message,
+    err.stack,
+  );
+  if (!res.headersSent)
+    res.status(500).json({ error: "Internal server error" });
 });
 
 app.listen(PORT, () => console.log(`WhatsApp bot running on port ${PORT}`));
