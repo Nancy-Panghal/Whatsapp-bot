@@ -809,8 +809,8 @@ async function handleStart(phone, token) {
     const { data } = await supabase
       .from("enrollments")
       .select(
-        "id, student_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
-      )
+  "id, student_id, payment_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
+)
       .eq("course_uuid", course.id)
       .eq("student_id", student.id)
       .limit(1);
@@ -821,8 +821,8 @@ async function handleStart(phone, token) {
     const { data } = await supabase
       .from("enrollments")
       .select(
-        "id, student_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
-      )
+  "id, student_id, payment_id, payment_status, delivery_method, completed_lessons, current_lesson, quiz_results",
+)
       .eq("course_uuid", course.id)
       .eq("phone", phoneOrEmail)
       .limit(1);
@@ -866,9 +866,14 @@ if (
 
   const now = new Date().toISOString();
 
-  // 5. Update or create enrollment — never downgrade payment_status from paid to free
-  let enrollmentId = null;
-  let enrollError = null;
+const safeTokenPaymentId =
+  tokenRow.payment_id === "TEST"
+    ? `TEST:${course.id}:${tokenRow.id}`
+    : tokenRow.payment_id || null;
+
+// 5. Update or create enrollment — never downgrade payment_status from paid to free
+let enrollmentId = null;
+let enrollError = null;
 
   if (existingEnrollment) {
     const newPaymentStatus =
@@ -885,7 +890,7 @@ if (
         phone: phoneOrEmail,
         payment_status: newPaymentStatus,
         payment_id:
-          tokenRow.payment_id || existingEnrollment.payment_id || null,
+  existingEnrollment.payment_id || safeTokenPaymentId,
         delivery_method:
           existingEnrollment.delivery_method || course.delivery || "both",
         last_accessed: now,
@@ -904,7 +909,7 @@ if (
         creator_id: tokenRow.creator_id,
         student_id: student?.id || null,
         current_lesson: 1,
-        payment_id: tokenRow.payment_id || null,
+        payment_id: safeTokenPaymentId,
         payment_status: isPaid ? "paid" : "free",
         completed_lessons: [],
         quiz_results: [],
